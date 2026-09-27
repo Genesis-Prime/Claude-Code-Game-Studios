@@ -313,7 +313,7 @@ def swapper():
                     handle.write(safe_bytes)
             os.replace(next_path, active)
             use_link = not use_link
-        except FileNotFoundError:
+        except (FileNotFoundError, PermissionError):
             continue
 
 
@@ -340,6 +340,40 @@ PY
 [ "$?" -eq 0 ] || fail "checkpoint race regression failed"
 
 # A direct symlink must not disclose its target through any automatic consumer.
+create_native_link() {
+  "$test_python" -I - "$1" "$2" "$3" <<'PY'
+import os
+import sys
+
+target, link_path, link_kind = sys.argv[1:]
+try:
+    if link_kind == "hard":
+        os.link(target, link_path)
+    else:
+        os.symlink(target, link_path, target_is_directory=(link_kind == "directory"))
+        if not os.path.islink(link_path):
+            raise OSError("native interpreter did not create a symbolic link")
+except (OSError, NotImplementedError):
+    raise SystemExit(1)
+PY
+}
+
+remove_native_link() {
+  "$test_python" -I - "$1" "$2" <<'PY'
+import os
+import sys
+
+link_path, link_kind = sys.argv[1:]
+try:
+    if os.name == "nt" and link_kind == "directory":
+        os.rmdir(link_path)
+    else:
+        os.unlink(link_path)
+except FileNotFoundError:
+    pass
+PY
+}
+
 secret_sentinel="CCGS_SECRET_SENTINEL_7f6c8a"
 printf '%s\n' \
   '<!-- STATUS -->' \
@@ -350,7 +384,7 @@ printf '%s\n' \
   '<!-- /CHECKPOINT -->' > "$test_root/secret.txt"
 rm -f -- "$project/production/session-state/active.md"
 
-if ln -s "$test_root/secret.txt" "$project/production/session-state/active.md" 2>/dev/null; then
+if create_native_link "$test_root/secret.txt" "$project/production/session-state/active.md" file 2>/dev/null; then
   if rejected_content=$(
     cd "$project" || exit 1
     CCGS_ROOT="$project"
@@ -372,11 +406,15 @@ $(cd "$project" && printf '%s\n' "$status_input" | bash .claude/statusline.sh 2>
     assert_not_contains "$session_log" "$secret_sentinel" "Stop hook archived a symlink target"
   fi
 
-  rm -f -- "$project/production/session-state/active.md"
-  rmdir "$project/production/session-state"
-  mkdir -p "$test_root/redirected-state"
-  cp "$test_root/secret.txt" "$test_root/redirected-state/active.md"
-  ln -s "$test_root/redirected-state" "$project/production/session-state"
+  remove_native_link "$project/production/session-state/active.md" file
+else
+  printf 'SKIP: native interpreter did not permit file-symlink regression check\n'
+fi
+
+rmdir "$project/production/session-state"
+mkdir -p "$test_root/redirected-state"
+cp "$test_root/secret.txt" "$test_root/redirected-state/active.md"
+if create_native_link "$test_root/redirected-state" "$project/production/session-state" directory 2>/dev/null; then
   if (
     cd "$project" || exit 1
     CCGS_ROOT="$project"
@@ -385,21 +423,24 @@ $(cd "$project" && printf '%s\n' "$status_input" | bash .claude/statusline.sh 2>
   ); then
     fail "checkpoint under a symlinked parent was accepted"
   fi
-  rm -f -- "$project/production/session-state"
-  mkdir -p "$project/production/session-state"
-
-  if ln "$test_root/secret.txt" "$project/production/session-state/active.md" 2>/dev/null; then
-    if (
-      cd "$project" || exit 1
-      CCGS_ROOT="$project"
-      . .claude/hooks/path-security.sh
-      ccgs_read_session_state "$project" >/dev/null 2>&1
-    ); then
-      fail "hard-linked checkpoint was accepted"
-    fi
-  fi
+  remove_native_link "$project/production/session-state" directory
 else
-  printf 'SKIP: filesystem did not permit symlink regression checks\n'
+  printf 'SKIP: native interpreter did not permit directory-symlink regression check\n'
+fi
+mkdir -p "$project/production/session-state"
+
+if create_native_link "$test_root/secret.txt" "$project/production/session-state/active.md" hard 2>/dev/null; then
+  if (
+    cd "$project" || exit 1
+    CCGS_ROOT="$project"
+    . .claude/hooks/path-security.sh
+    ccgs_read_session_state "$project" >/dev/null 2>&1
+  ); then
+    fail "hard-linked checkpoint was accepted"
+  fi
+  remove_native_link "$project/production/session-state/active.md" file
+else
+  printf 'SKIP: native interpreter did not permit hard-link regression check\n'
 fi
 
 # The skill fixes must preserve literal paths, linked worktrees, and truthful CI text.
