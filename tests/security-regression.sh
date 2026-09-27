@@ -262,14 +262,27 @@ if os.name == "nt":
     os.makedirs(external_state)
     with open(os.path.join(external_state, "active.md"), "wb") as handle:
         handle.write(secret_bytes)
+    junction_env = os.environ.copy()
+    junction_env["CCGS_JUNCTION_PATH"] = junction_path
+    junction_env["CCGS_JUNCTION_TARGET"] = external_production
     created = subprocess.run(
-        ["cmd.exe", "/d", "/c", "mklink", "/J", junction_path, external_production],
+        [
+            "powershell.exe",
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "New-Item -ItemType Junction -Path $env:CCGS_JUNCTION_PATH "
+            "-Target $env:CCGS_JUNCTION_TARGET -ErrorAction Stop | Out-Null",
+        ],
+        env=junction_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         check=False,
     )
     if created.returncode != 0:
-        raise SystemExit("could not create Windows junction regression fixture")
+        details = created.stdout.decode("utf-8", errors="replace").strip()
+        raise SystemExit("could not create Windows junction regression fixture: {}".format(details))
     try:
         try:
             module._read_validated(junction_root)
