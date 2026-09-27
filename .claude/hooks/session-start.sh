@@ -26,6 +26,7 @@ else
   CCGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
 fi
 [ -n "$CCGS_ROOT" ] && cd "$CCGS_ROOT" 2>/dev/null || true
+. .claude/hooks/path-security.sh
 
 # Claude Code SessionStart hook: Load project context at session start
 # Outputs context information that Claude sees when a session begins
@@ -209,7 +210,7 @@ STATE_FILE="production/session-state/active.md"
 if [ -f .claude/hooks/yaml-helper.sh ] && ! command -v session_state_enabled >/dev/null 2>&1; then
     . .claude/hooks/yaml-helper.sh
 fi
-if [ -f "$STATE_FILE" ] && { ! command -v session_state_enabled >/dev/null 2>&1 || session_state_enabled; }; then
+if trusted_session_state_file "$STATE_FILE" && { ! command -v session_state_enabled >/dev/null 2>&1 || session_state_enabled; }; then
     echo ""
     echo "=== ACTIVE SESSION STATE DETECTED ==="
     echo "A previous session left state at: $STATE_FILE"

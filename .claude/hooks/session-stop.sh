@@ -26,6 +26,7 @@ else
   CCGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
 fi
 [ -n "$CCGS_ROOT" ] && cd "$CCGS_ROOT" 2>/dev/null || true
+. .claude/hooks/path-security.sh
 
 # Claude Code Stop hook: Log session summary when Claude finishes
 # Records what was worked on for audit trail and sprint tracking
@@ -70,7 +71,7 @@ MODIFIED_FILES=$(git diff --name-only 2>/dev/null)
 # failure direction is a duplicate entry, never a lost one.
 STATE_FILE="production/session-state/active.md"
 STATE_HASH_FILE="$SESSION_LOG_DIR/.active-state.hash"
-if [ -f "$STATE_FILE" ]; then
+if trusted_session_state_file "$STATE_FILE"; then
     STATE_HASH=$(git hash-object -- "$STATE_FILE" 2>/dev/null)
     if [ -z "$STATE_HASH" ] || [ "$STATE_HASH" != "$(cat "$STATE_HASH_FILE" 2>/dev/null)" ]; then
         {

@@ -26,6 +26,7 @@ else
   CCGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
 fi
 [ -n "$CCGS_ROOT" ] && cd "$CCGS_ROOT" 2>/dev/null || true
+. .claude/hooks/path-security.sh
 
 # Claude Code PreCompact hook: Dump session state before context compression
 # This output appears in the conversation right before compaction, ensuring
@@ -59,7 +60,7 @@ echo "Timestamp: $(date)"
 # So: emit only the region between the CHECKPOINT markers (bounded by the schema
 # in .claude/docs/templates/session-state.md) plus a pointer to the whole file.
 STATE_FILE="production/session-state/active.md"
-if [ -f "$STATE_FILE" ]; then
+if trusted_session_state_file "$STATE_FILE"; then
     echo ""
     echo "## Active Session State — checkpoint from $STATE_FILE"
     CHECKPOINT=$(sed -n '/<!-- CHECKPOINT -->/,/<!-- \/CHECKPOINT -->/p' "$STATE_FILE" 2>/dev/null \
