@@ -470,13 +470,24 @@ printf '%s\n' 'base' > "$story_repo/base.txt"
 git -C "$story_repo" add -- base.txt
 git -C "$story_repo" commit -q -m "test: base"
 git -C "$story_repo" worktree add -q -b security-test "$story_worktree"
-printf '%s\n' 'literal' > "$story_worktree/:(glob)*"
 printf '%s\n' 'literal' > "$story_worktree/-leading"
 printf '%s\n' 'literal' > "$story_worktree/space name"
 printf '%s\n' 'must stay unstaged' > "$story_worktree/unrelated.txt"
-git -C "$story_worktree" --literal-pathspecs add -- ':(glob)*' '-leading' 'space name'
+
+# The magic pathspec is valid Git syntax on every platform even though Windows
+# cannot create a filename containing ':' or '*'. Prove the unsafe form would
+# select unrelated files, then prove literal mode rejects it without staging.
+unsafe_preview=$(git -C "$story_worktree" add -n -- ':(glob)*' 2>&1) \
+  || fail "Git magic-pathspec control did not execute: $unsafe_preview"
+assert_contains "$unsafe_preview" "unrelated.txt" "magic-pathspec control did not select the unrelated file"
+if git -C "$story_worktree" --literal-pathspecs add -- ':(glob)*' >/dev/null 2>&1; then
+  fail "literal pathspec mode accepted a nonexistent magic-looking path"
+fi
+staged_after_rejection=$(git -C "$story_worktree" diff --cached --name-only)
+[ -z "$staged_after_rejection" ] || fail "rejected literal pathspec staged files: $staged_after_rejection"
+
+git -C "$story_worktree" --literal-pathspecs add -- '-leading' 'space name'
 staged_paths=$(git -C "$story_worktree" diff --cached --name-only)
-assert_contains "$staged_paths" ":(glob)*" "literal pathspec did not stage the magic-looking filename"
 assert_contains "$staged_paths" "-leading" "literal pathspec did not stage the option-looking filename"
 assert_contains "$staged_paths" "space name" "literal pathspec did not stage the spaced filename"
 assert_not_contains "$staged_paths" "unrelated.txt" "literal pathspec staged an unrelated file"
