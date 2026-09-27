@@ -94,7 +94,7 @@ if echo "$FILE_PATH" | grep -qE '(^|/)assets/data/.*\.json$'; then
         done
 
         if [ -n "$PYTHON_CMD" ]; then
-            if ! "$PYTHON_CMD" -m json.tool "$FILE_PATH" > /dev/null 2>&1; then
+            if ! "$PYTHON_CMD" -I -m json.tool "$FILE_PATH" > /dev/null 2>&1; then
                 ERRORS="$ERRORS\n  FORMAT: $FILE_PATH is not valid JSON — fix syntax errors before continuing"
             fi
         else

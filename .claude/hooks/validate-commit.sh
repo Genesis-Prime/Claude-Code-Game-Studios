@@ -117,7 +117,7 @@ if [ -n "$DATA_FILES" ]; then
     if [ -n "$PYTHON_CMD" ]; then
         # One spawn, all files. The file list arrives on stdin so an unbounded
         # number of paths cannot overflow the argument limit.
-        BAD_JSON=$(printf '%s\n' "$DATA_FILES" | "$PYTHON_CMD" -c '
+        BAD_JSON=$(printf '%s\n' "$DATA_FILES" | "$PYTHON_CMD" -I -c '
 import json, sys, os
 bad = []
 for line in sys.stdin.read().splitlines():
