@@ -49,24 +49,23 @@ if [ -z "$MESSAGE" ]; then
   MESSAGE="Claude Code needs your attention"
 fi
 
-# TRUNCATE FIRST, then escape. Escaping doubles each `'` into `''`, so cutting
-# at a fixed byte count afterwards can land between the two halves of a pair and
-# hand PowerShell an unbalanced quote. The command then fails to parse, and
-# because it is backgrounded with stderr discarded the only symptom is a
-# notification that never appears.
-MESSAGE_SAFE=$(printf '%s' "$MESSAGE" | head -c 200 | sed "s/'/''/g")
+# Keep notification text out of PowerShell source. PowerShell accepts Unicode
+# smart quotes as string delimiters, so escaping ASCII apostrophes alone is not
+# sufficient. An environment variable passes the text as data instead.
+MESSAGE_DISPLAY=$(printf '%s' "$MESSAGE" | head -c 200)
 
 # Show Windows balloon tip notification (works on all Windows 10/11 without extra modules)
+CCGS_NOTIFICATION_MESSAGE="$MESSAGE_DISPLAY" \
 powershell.exe -NonInteractive -WindowStyle Hidden -Command "
   Add-Type -AssemblyName System.Windows.Forms
   \$notify = New-Object System.Windows.Forms.NotifyIcon
   \$notify.Icon = [System.Drawing.SystemIcons]::Information
   \$notify.BalloonTipTitle = 'Claude Code'
-  \$notify.BalloonTipText = '$MESSAGE_SAFE'
+  \$notify.BalloonTipText = \$env:CCGS_NOTIFICATION_MESSAGE
   \$notify.Visible = \$true
   \$notify.ShowBalloonTip(5000)
   Start-Sleep -Seconds 6
   \$notify.Dispose()
 " 2>/dev/null &
 
-echo "Notification: $MESSAGE_SAFE"
+printf 'Notification: %s\n' "$MESSAGE_DISPLAY"
