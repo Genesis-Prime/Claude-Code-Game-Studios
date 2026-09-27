@@ -81,7 +81,9 @@ _yaml_helper_resolve_python() {
   for candidate in python python3 py; do
     if command -v "$candidate" >/dev/null 2>&1; then
       # Require Python 3 — the parser uses py3-only open(encoding=) kwargs.
-      if "$candidate" -c "import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)" >/dev/null 2>&1; then
+      # Isolated mode prevents a workspace module from running during startup
+      # or shadowing standard-library imports used by the inline parsers.
+      if "$candidate" -I -c "import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)" >/dev/null 2>&1; then
         _yaml_helper_python="$candidate"
         return 0
       fi
@@ -99,7 +101,7 @@ get_yaml_key() {
     echo "yaml-helper: no python interpreter found (tried python, python3, py)" >&2
     return 0
   fi
-  "$_yaml_helper_python" - "$file" "$path" <<'PYEOF'
+  "$_yaml_helper_python" -I - "$file" "$path" <<'PYEOF'
 import sys, re
 
 path_file, dotted = sys.argv[1], sys.argv[2]
@@ -181,7 +183,7 @@ get_yaml_array() {
     echo "yaml-helper: no python interpreter found (tried python, python3, py)" >&2
     return 0
   fi
-  "$_yaml_helper_python" - "$file" "$path" <<'PYEOF'
+  "$_yaml_helper_python" -I - "$file" "$path" <<'PYEOF'
 import sys, re
 
 path_file, dotted = sys.argv[1], sys.argv[2]
@@ -573,7 +575,7 @@ validate_local_scope() {
   [ -f "$file" ] || return 0
   if ! _yaml_helper_resolve_python; then return 0; fi
   local found key rc=0
-  found=$("$_yaml_helper_python" - "$file" "$_yaml_helper_locally_overridable" <<'PYEOF'
+  found=$("$_yaml_helper_python" -I - "$file" "$_yaml_helper_locally_overridable" <<'PYEOF'
 import sys, re
 
 path_file, allowed_table = sys.argv[1], sys.argv[2]
@@ -731,7 +733,7 @@ validate_yaml_enum() {
   # get_yaml_key uses, the enum table is walked in the same order, absent keys
   # are skipped exactly as `[ -z "$actual" ] && continue` did, and the error
   # text is byte-identical.
-  "$_yaml_helper_python" - "$file" "$_yaml_helper_enums" <<'PYEOF'
+  "$_yaml_helper_python" -I - "$file" "$_yaml_helper_enums" <<'PYEOF'
 import sys, re
 
 path_file, enum_table = sys.argv[1], sys.argv[2]
@@ -1258,7 +1260,7 @@ get_yaml_child_keys() {
   local file="$1" path="$2"
   if [ -z "$file" ] || [ -z "$path" ] || [ ! -f "$file" ]; then return 0; fi
   _yaml_helper_resolve_python || return 0
-  "$_yaml_helper_python" - "$file" "$path" <<'PYEOF'
+  "$_yaml_helper_python" -I - "$file" "$path" <<'PYEOF'
 import sys, re
 path_file, dotted = sys.argv[1], sys.argv[2]
 keys = dotted.split('.')
