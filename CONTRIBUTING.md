@@ -69,6 +69,15 @@ and exits cleanly.
 Include a brief note in your PR description describing what you tested and
 what the output looked like.
 
+For framework hooks and security-sensitive workflows, run:
+
+```bash
+bash tests/security-regression.sh
+```
+
+GitHub Actions runs shell syntax checks, Python compilation, and this suite on
+Windows, macOS, and Linux for every pull request and every push to `main`.
+
 ## Commit Format
 
 Use [Conventional Commits](https://www.conventionalcommits.org/):

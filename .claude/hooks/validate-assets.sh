@@ -84,17 +84,19 @@ fi
 # Invalid JSON will break runtime loading -- this is a build-breaking error
 if echo "$FILE_PATH" | grep -qE '(^|/)assets/data/.*\.json$'; then
     if [ -f "$FILE_PATH" ]; then
-        # Find a working Python command
+        # Require Python 3 isolated mode so repository modules cannot shadow
+        # json or other standard-library imports during automatic validation.
         PYTHON_CMD=""
         for cmd in python python3 py; do
-            if command -v "$cmd" >/dev/null 2>&1; then
+            if command -v "$cmd" >/dev/null 2>&1 \
+                && "$cmd" -I -c 'import sys; raise SystemExit(0 if sys.version_info[0] >= 3 else 1)' >/dev/null 2>&1; then
                 PYTHON_CMD="$cmd"
                 break
             fi
         done
 
         if [ -n "$PYTHON_CMD" ]; then
-            if ! "$PYTHON_CMD" -m json.tool "$FILE_PATH" > /dev/null 2>&1; then
+            if ! "$PYTHON_CMD" -I -m json.tool "$FILE_PATH" > /dev/null 2>&1; then
                 ERRORS="$ERRORS\n  FORMAT: $FILE_PATH is not valid JSON — fix syntax errors before continuing"
             fi
         else
@@ -103,7 +105,7 @@ if echo "$FILE_PATH" | grep -qE '(^|/)assets/data/.*\.json$'; then
             # a file it never opened -- indistinguishable from valid JSON. The
             # sibling validate-commit.sh already warns in exactly this case;
             # this half was the one that did not.
-            echo "WARNING: Cannot validate JSON (python not found) — $FILE_PATH unchecked" >&2
+            echo "WARNING: Cannot validate JSON (Python 3 isolated mode unavailable) — $FILE_PATH unchecked" >&2
         fi
     fi
 fi

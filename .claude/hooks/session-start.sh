@@ -26,6 +26,9 @@ else
   CCGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
 fi
 [ -n "$CCGS_ROOT" ] && cd "$CCGS_ROOT" 2>/dev/null || true
+if [ -f .claude/hooks/path-security.sh ]; then
+    . .claude/hooks/path-security.sh
+fi
 
 # Claude Code SessionStart hook: Load project context at session start
 # Outputs context information that Claude sees when a session begins
@@ -209,12 +212,14 @@ STATE_FILE="production/session-state/active.md"
 if [ -f .claude/hooks/yaml-helper.sh ] && ! command -v session_state_enabled >/dev/null 2>&1; then
     . .claude/hooks/yaml-helper.sh
 fi
-if [ -f "$STATE_FILE" ] && { ! command -v session_state_enabled >/dev/null 2>&1 || session_state_enabled; }; then
-    echo ""
-    echo "=== ACTIVE SESSION STATE DETECTED ==="
-    echo "A previous session left state at: $STATE_FILE"
-    echo "Read this file to recover context and continue where you left off."
-    echo ""
+if command -v ccgs_session_state_path_present >/dev/null 2>&1 \
+    && ccgs_session_state_path_present "$CCGS_ROOT" \
+    && { ! command -v session_state_enabled >/dev/null 2>&1 || session_state_enabled; }; then
+    if STATE_CONTENT=$(ccgs_read_session_state "$CCGS_ROOT"); then
+        echo ""
+        echo "=== ACTIVE SESSION STATE DETECTED ==="
+        echo "A validated checkpoint snapshot was loaded from: $STATE_FILE"
+        echo ""
     # The CHECKPOINT region -- the same region pre-compact.sh injects.
     #
     # Previewing `tail -20` here while pre-compact takes `head -100` would put two
@@ -222,9 +227,10 @@ if [ -f "$STATE_FILE" ] && { ! command -v session_state_enabled >/dev/null 2>&1 
     # depend on which hook happened to fire. Neither was wrong, because
     # nothing defined where the recoverable state lived. The schema in
     # .claude/docs/templates/session-state.md defines it; both read it now.
-    CHECKPOINT=$(sed -n '/<!-- CHECKPOINT -->/,/<!-- \/CHECKPOINT -->/p' "$STATE_FILE" 2>/dev/null \
-                 | grep -v '<!-- /\?CHECKPOINT -->')
-    TOTAL_LINES=$(wc -l < "$STATE_FILE" 2>/dev/null | tr -d ' ')
+        CHECKPOINT=$(printf '%s\n' "$STATE_CONTENT" \
+                     | sed -n '/<!-- CHECKPOINT -->/,/<!-- \/CHECKPOINT -->/p' \
+                     | grep -v '<!-- /\?CHECKPOINT -->')
+        TOTAL_LINES=$(printf '%s' "$STATE_CONTENT" | awk 'END { print NR }')
     # A sed range whose END address never matches runs to EOF. So a file with an
     # opening marker and NO closing one produced a non-empty capture of the whole
     # remaining file and took the healthy branch below -- silently previewing
@@ -235,33 +241,37 @@ if [ -f "$STATE_FILE" ] && { ! command -v session_state_enabled >/dev/null 2>&1 
     # Two consumers of one region must agree on what malformed means.
     # `<!-- CHECKPOINT -->` cannot match `<!-- /CHECKPOINT -->` -- the slash sits
     # where the space would be -- so these two counts are independent.
-    CP_OPEN=$(grep -c '<!-- CHECKPOINT -->' "$STATE_FILE" 2>/dev/null | tr -d ' ')
-    CP_CLOSE=$(grep -c '<!-- /CHECKPOINT -->' "$STATE_FILE" 2>/dev/null | tr -d ' ')
-    if [ "${CP_OPEN:-0}" -gt 0 ] && [ "${CP_CLOSE:-0}" -eq 0 ]; then
-        echo "  [!] CHECKPOINT block is not terminated — no <!-- /CHECKPOINT --> marker."
-        echo "      Not previewing it: without the closing marker the checkpoint"
-        echo "      cannot be told from the narrative, and everything to the end"
-        echo "      of the file would be shown as if it were recoverable state."
-        echo "      Re-create from .claude/docs/templates/session-state.md."
-        echo "  ... ($TOTAL_LINES total lines — read the full file to continue)"
-    elif [ -n "$CHECKPOINT" ]; then
-        echo "Checkpoint:"
-        printf '%s\n' "$CHECKPOINT"
-        echo "  ... ($TOTAL_LINES total lines — read the full file for detail)"
-    else
-        echo "Quick summary (first 20 lines — no CHECKPOINT block in this file):"
-        head -20 "$STATE_FILE" 2>/dev/null
-        echo "  ... ($TOTAL_LINES total lines — read the full file to continue)"
-        echo "  NOTE: re-create from .claude/docs/templates/session-state.md so"
-        echo "        recovery reads a bounded checkpoint instead of a slice."
-    fi
+        CP_OPEN=$(printf '%s\n' "$STATE_CONTENT" | grep -c '<!-- CHECKPOINT -->' | tr -d ' ')
+        CP_CLOSE=$(printf '%s\n' "$STATE_CONTENT" | grep -c '<!-- /CHECKPOINT -->' | tr -d ' ')
+        if [ "${CP_OPEN:-0}" -gt 0 ] && [ "${CP_CLOSE:-0}" -eq 0 ]; then
+            echo "  [!] CHECKPOINT block is not terminated — no <!-- /CHECKPOINT --> marker."
+            echo "      Not previewing it: without the closing marker the checkpoint"
+            echo "      cannot be told from the narrative, and everything to the end"
+            echo "      of the file would be shown as if it were recoverable state."
+            echo "      Re-create from .claude/docs/templates/session-state.md."
+            echo "  ... ($TOTAL_LINES lines in the validated snapshot)"
+        elif [ -n "$CHECKPOINT" ]; then
+            echo "Checkpoint:"
+            printf '%s\n' "$CHECKPOINT"
+            echo "  ... ($TOTAL_LINES lines in the validated snapshot)"
+        else
+            echo "Quick summary (first 20 lines — no CHECKPOINT block in this file):"
+            printf '%s\n' "$STATE_CONTENT" | head -20
+            echo "  ... ($TOTAL_LINES lines in the validated snapshot)"
+            echo "  NOTE: re-create from .claude/docs/templates/session-state.md so"
+            echo "        recovery reads a bounded checkpoint instead of a slice."
+        fi
     # Rotation is an OBSERVATION, never an action: helpers in .claude/scripts/
     # emit observations, never verdicts (CLAUDE.md). The user decides.
-    if [ "${TOTAL_LINES:-0}" -gt 200 ] 2>/dev/null; then
-        echo "  Note: $TOTAL_LINES lines. Narrative can be rotated into"
-        echo "        production/session-logs/ — bash .claude/scripts/rotate-session-state.sh"
+        if [ "${TOTAL_LINES:-0}" -gt 200 ] 2>/dev/null; then
+            echo "  Note: $TOTAL_LINES lines. Narrative can be rotated into"
+            echo "        production/session-logs/ — bash .claude/scripts/rotate-session-state.sh"
+        fi
+        echo "=== END SESSION STATE PREVIEW ==="
+    else
+        echo ""
+        echo "[!] Session state exists but failed security validation; automatic recovery skipped."
     fi
-    echo "=== END SESSION STATE PREVIEW ==="
 fi
 
 # --- engine reference vs configured engine -----------------------------------

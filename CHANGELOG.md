@@ -8,6 +8,29 @@ existing project on the older config files.
 
 ---
 
+## Unreleased
+
+### Security
+
+- Python-backed hooks and artifact checks now use isolated mode, preventing
+  project files from shadowing standard-library modules during validation.
+- Session checkpoint hooks and the status line now consume one validated
+  snapshot. Symlinks, Windows junctions and other reparse points, hard links,
+  non-regular files, oversized checkpoints, and files that change while being
+  read are rejected.
+- Windows notification messages are passed to PowerShell as data instead of
+  being embedded in command source.
+- `/story-done` commit suggestions now preserve literal commit messages and
+  file paths, including linked-worktree Git paths.
+- Generated Unreal CI no longer runs pull request code on a persistent
+  self-hosted runner and no longer leaves checkout credentials behind.
+- Generated CI pins every action to a reviewed commit. Unity license-bearing
+  tests now run only after trusted code reaches protected `main`.
+- Repository CI now runs shell syntax checks and the security regression suite
+  on Windows, macOS, and Linux for every pull request and push to `main`.
+
+---
+
 ## [1.1.1] — 2026-09-24
 
 **Skills and agents work again outside auto mode.** A fix release for
