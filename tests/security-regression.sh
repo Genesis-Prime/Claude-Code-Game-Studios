@@ -214,6 +214,7 @@ active = os.path.join(root, "production", "session-state", "active.md")
 next_path = active + ".next"
 stop = threading.Event()
 skip = threading.Event()
+successful_swaps = [0]
 
 
 # A regular-file replacement in the exact interval between lstat and open must
@@ -312,6 +313,7 @@ def swapper():
                 with open(next_path, "wb") as handle:
                     handle.write(safe_bytes)
             os.replace(next_path, active)
+            successful_swaps[0] += 1
             use_link = not use_link
         except (FileNotFoundError, PermissionError):
             continue
@@ -336,6 +338,8 @@ finally:
         os.unlink(next_path)
     except FileNotFoundError:
         pass
+if not skip.is_set() and successful_swaps[0] == 0:
+    raise SystemExit("race test completed without a successful adversarial swap")
 PY
 [ "$?" -eq 0 ] || fail "checkpoint race regression failed"
 
@@ -371,6 +375,8 @@ try:
         os.unlink(link_path)
 except FileNotFoundError:
     pass
+if os.path.lexists(link_path):
+    raise SystemExit("native link cleanup left the path in place")
 PY
 }
 
@@ -406,7 +412,8 @@ $(cd "$project" && printf '%s\n' "$status_input" | bash .claude/statusline.sh 2>
     assert_not_contains "$session_log" "$secret_sentinel" "Stop hook archived a symlink target"
   fi
 
-  remove_native_link "$project/production/session-state/active.md" file
+  remove_native_link "$project/production/session-state/active.md" file \
+    || fail "file-symlink regression fixture cleanup failed"
 else
   printf 'SKIP: native interpreter did not permit file-symlink regression check\n'
 fi
@@ -423,7 +430,8 @@ if create_native_link "$test_root/redirected-state" "$project/production/session
   ); then
     fail "checkpoint under a symlinked parent was accepted"
   fi
-  remove_native_link "$project/production/session-state" directory
+  remove_native_link "$project/production/session-state" directory \
+    || fail "directory-symlink regression fixture cleanup failed"
 else
   printf 'SKIP: native interpreter did not permit directory-symlink regression check\n'
 fi
@@ -438,7 +446,8 @@ if create_native_link "$test_root/secret.txt" "$project/production/session-state
   ); then
     fail "hard-linked checkpoint was accepted"
   fi
-  remove_native_link "$project/production/session-state/active.md" file
+  remove_native_link "$project/production/session-state/active.md" file \
+    || fail "hard-link regression fixture cleanup failed"
 else
   printf 'SKIP: native interpreter did not permit hard-link regression check\n'
 fi
