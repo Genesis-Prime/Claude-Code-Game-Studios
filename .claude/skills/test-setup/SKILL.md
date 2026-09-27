@@ -153,8 +153,12 @@ production/qa/
 
 ## CI
 
-Tests run automatically on every push to `main` and on every pull request.
-A failed test suite blocks merging.
+The Godot workflow runs on pushes to `main` and on pull requests with a
+read-only workflow token and no project secrets. Unity and Unreal run only
+after trusted code reaches protected `main`: Unity exposes a license secret to
+the test process, and Unreal uses a persistent self-hosted machine. Their pull
+request testing requires a separate credentialless workflow before the change
+can be treated as tested.
 ```
 ```
 
@@ -248,6 +252,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     name: Run GdUnit4 Tests
@@ -255,22 +262,25 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: true
+          persist-credentials: false
 
       - name: Run GdUnit4 Tests
-        uses: MikeSchulze/gdUnit4-action@v1
+        uses: godot-gdunit-labs/gdUnit4-action@17eeffa988f9732fdc3dba3067405d16b55809de # v1.3.2
         with:
           godot-version: '[VERSION FROM docs/engine-reference/godot/VERSION.md]'
           paths: |
             tests/unit
             tests/integration
           report-name: test-results
+          publish-report: false
+          upload-report: false
 
       - name: Upload Test Results
-        if: always()
-        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-results
           path: reports/
@@ -286,8 +296,12 @@ name: Automated Tests
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+
+# Do not add a pull request trigger to this workflow. Unity tests execute
+# project code with the license secret in their environment.
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -296,12 +310,13 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: true
+          persist-credentials: false
 
       - name: Run Edit Mode Tests
-        uses: game-ci/unity-test-runner@v4
+        uses: game-ci/unity-test-runner@fa6ced25861c16ef56187828c43f76d00df43a23 # v4.3.2
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
         with:
@@ -309,7 +324,7 @@ jobs:
           artifactsPath: test-results/editmode
 
       - name: Run Play Mode Tests
-        uses: game-ci/unity-test-runner@v4
+        uses: game-ci/unity-test-runner@fa6ced25861c16ef56187828c43f76d00df43a23 # v4.3.2
         env:
           UNITY_LICENSE: ${{ secrets.UNITY_LICENSE }}
         with:
@@ -318,14 +333,16 @@ jobs:
 
       - name: Upload Test Results
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-results
           path: test-results/
 ```
 
-Note: Unity CI requires a `UNITY_LICENSE` secret. Add to GitHub repository
-secrets before the first CI run.
+Note: Unity CI requires a `UNITY_LICENSE` secret. Add it to GitHub repository
+secrets before the first trusted `main` run. Keep this workflow restricted to
+protected branches. A pull request workflow must be credentialless; do not pass
+the license secret to code from a pull request.
 
 ### Unreal Engine
 
@@ -337,8 +354,12 @@ name: Automated Tests
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+
+# Do not add a pull request trigger to this job. It executes repository code on
+# a persistent self-hosted machine and is limited to trusted, merged code.
+
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -347,9 +368,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           lfs: true
+          persist-credentials: false
 
       - name: Run Automation Tests
         run: |
@@ -361,14 +383,19 @@ jobs:
 
       - name: Upload Logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: test-logs
           path: Saved/Logs/
 ```
 
-Note: UE CI requires a self-hosted runner with Unreal Editor installed.
-Set the `UE_EDITOR_PATH` environment variable on the runner.
+Note: UE CI requires a self-hosted runner with Unreal Editor installed. Set the
+`UE_EDITOR_PATH` environment variable on the runner. Keep persistent runners
+restricted to trusted events such as pushes to protected branches. If pull
+request testing is required, use a separate workflow and runner fleet that is
+ephemeral, isolated per job, contains no credentials beyond the job's minimal
+read-only token, and is destroyed after execution. Never run pull request code
+on a persistent Unreal build machine.
 
 ---
 
@@ -452,4 +479,7 @@ Verdict: **COMPLETE** — test framework scaffolded and CI/CD wired up.
 - **`force` flag skips the "already exists" early-exit but never overwrites.**
   It means "create any missing files even if the directory already exists."
 - For Unity CI, note that the `UNITY_LICENSE` secret must be configured
-  manually. Do not attempt to automate license management.
+  manually. Do not attempt to automate license management or expose it to a
+  pull request workflow.
+- Keep every generated action pinned to a reviewed 40-character commit SHA.
+  Update a pin only after reviewing the action's release and source changes.

@@ -49,6 +49,7 @@ verdict set at all, so a reader had nothing to branch on.
 | `production/sprint-status.yaml` | `status: done`, `completed: [date]`, top-level `updated` field | updated silently alongside story file if file exists |
 | `docs/tech-debt-register.md` | Advisory deviation entries (if user confirms) | appended if advisory deviations exist and user agrees |
 | `production/session-state/active.md` | `## Session Extract — /story-done [date]` block: verdict, story path, tech debt count, next recommended story | appended (created if absent) |
+| Git path returned by `git rev-parse --git-path CCGS_COMMIT_MSG` | Literal proposed commit message | written only after separate path-specific approval; supports linked worktrees |
 
 ### Output Guarantees
 - `Status: Complete` is written only when verdict is COMPLETE or COMPLETE WITH NOTES and the user explicitly approves
@@ -57,11 +58,12 @@ verdict set at all, so a reader had nothing to branch on.
 
 ## Immutability Rules
 - READS but does NOT modify: `docs/architecture/tr-registry.yaml`, `docs/architecture/adr-NNNN-[slug].md` (Decision + Consequences only), GDD sections, `docs/architecture/control-manifest.md`, source files in `src/` (Grep only), test files in `tests/` (run via Bash; not edited)
-- MODIFIES: the story `.md` file (status + completion notes), `production/sprint-status.yaml` (if exists), `production/session-state/active.md` (append), `docs/tech-debt-register.md` (append, only with user approval)
+- MODIFIES: the story `.md` file (status + completion notes), `production/sprint-status.yaml` (if exists), `production/session-state/active.md` (append), `docs/tech-debt-register.md` (append, only with user approval), and the Git-resolved `CCGS_COMMIT_MSG` handoff file (only after separate path-specific approval)
 - Does NOT write to the code root or `tests/` under any circumstances
 
 ## Hard Constraints (Never Violate)
 - Never sets `Status: Complete` without explicit user approval ("May I update the story file?")
+- Never writes the commit-message handoff until the exact path returned by Git has been shown and separately approved
 - Never marks a Logic story Complete on a missing unit test when its resolved gate level is BLOCKING — the level is BLOCKING by default and whenever `testing.strict.logic` is `true`; it is ADVISORY only when `testing.strict.logic` is explicitly `false`
 - Never marks an Integration story Complete on missing evidence (integration test file or playtest session log) when its resolved gate level is BLOCKING — BLOCKING by default and under `testing.strict.integration: true`; ADVISORY only under an explicit `false`
 - Never marks a Visual/Feel or UI story Complete on a missing retained screenshot in `production/qa/evidence/` when its resolved gate level is BLOCKING — BLOCKING by default and under `testing.strict.visual`/`.ui: true`; ADVISORY only under an explicit `false`. A written description of a visual check is not a substitute for the image

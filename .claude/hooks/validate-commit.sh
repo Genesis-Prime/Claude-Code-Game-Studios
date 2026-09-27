@@ -53,7 +53,11 @@ fi
 # item; they spawn one each, and share this lookup.
 _VC_PY=""
 for _c in python python3 py; do
-    if command -v "$_c" >/dev/null 2>&1; then _VC_PY="$_c"; break; fi
+    if command -v "$_c" >/dev/null 2>&1 \
+        && "$_c" -I -c 'import sys; raise SystemExit(0 if sys.version_info[0] >= 3 else 1)' >/dev/null 2>&1; then
+        _VC_PY="$_c"
+        break
+    fi
 done
 
 # Get staged files
@@ -117,7 +121,7 @@ if [ -n "$DATA_FILES" ]; then
     if [ -n "$PYTHON_CMD" ]; then
         # One spawn, all files. The file list arrives on stdin so an unbounded
         # number of paths cannot overflow the argument limit.
-        BAD_JSON=$(printf '%s\n' "$DATA_FILES" | "$PYTHON_CMD" -c '
+        if ! BAD_JSON=$(printf '%s\n' "$DATA_FILES" | "$PYTHON_CMD" -I -c '
 import json, sys, os
 bad = []
 for line in sys.stdin.read().splitlines():
@@ -134,7 +138,10 @@ for line in sys.stdin.read().splitlines():
 # a line-by-line diff -- only a byte comparison against the pre-batch
 # implementation surfaced it. get_yaml_key writes bytes for the same reason.
 sys.stdout.buffer.write("\n".join(bad).encode("utf-8"))
-' 2>/dev/null)
+' 2>/dev/null); then
+            echo "BLOCKED: JSON validation failed to run in Python isolated mode" >&2
+            exit 2
+        fi
         if [ -n "$BAD_JSON" ]; then
             # Every offender at once. The per-file loop reported only the first
             # and exited, so a commit with several bad files took several
@@ -145,7 +152,7 @@ sys.stdout.buffer.write("\n".join(bad).encode("utf-8"))
             exit 2
         fi
     else
-        echo "WARNING: Cannot validate JSON (python not found)" >&2
+        echo "WARNING: Cannot validate JSON (Python 3 isolated mode unavailable)" >&2
     fi
 fi
 
@@ -206,7 +213,7 @@ if [ -n "$DESIGN_FILES" ]; then
         # documents warn -- a behaviour change smuggled inside a performance
         # fix. If that wants tightening it should be its own change with its
         # own test.
-        printf '%s\n' "$DESIGN_FILES" | "${_VC_PY:-python}" -c '
+        printf '%s\n' "$DESIGN_FILES" | "${_VC_PY:-python}" -I -c '
 import sys, os
 argv = sys.argv
 required = [x for x in argv[1].split("|") if x]

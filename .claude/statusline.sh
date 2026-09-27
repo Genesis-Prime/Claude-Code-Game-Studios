@@ -26,6 +26,9 @@ else
   CCGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
 fi
 [ -n "$CCGS_ROOT" ] && cd "$CCGS_ROOT" 2>/dev/null || true
+if [ -f .claude/hooks/path-security.sh ]; then
+  . .claude/hooks/path-security.sh
+fi
 
 # Claude Code Game Studios — Status Line
 # Receives JSON on stdin, outputs a single-line status.
@@ -177,8 +180,9 @@ fi
 # --- Epic/Feature/Task breadcrumb (Production+ only) ---
 breadcrumb=""
 if [ "$stage" = "Production" ] || [ "$stage" = "Polish" ] || [ "$stage" = "Release" ]; then
-  state_file="$cwd/production/session-state/active.md"
-  if [ -f "$state_file" ]; then
+  if command -v ccgs_session_state_path_present >/dev/null 2>&1 \
+      && ccgs_session_state_path_present "$cwd" \
+      && state_content=$(ccgs_read_session_state "$cwd" 2>/dev/null); then
     # Parse structured STATUS block
     in_block=false
     epic="" feature="" task=""
@@ -194,7 +198,7 @@ if [ "$stage" = "Production" ] || [ "$stage" = "Polish" ] || [ "$stage" = "Relea
           Task:*) task=$(echo "$line" | sed 's/^Task: *//') ;;
         esac
       fi
-    done < "$state_file"
+    done < <(printf '%s\n' "$state_content")
 
     # Build breadcrumb from whatever is set
     parts=""

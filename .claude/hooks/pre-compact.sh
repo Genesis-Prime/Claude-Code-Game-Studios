@@ -26,6 +26,9 @@ else
   CCGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
 fi
 [ -n "$CCGS_ROOT" ] && cd "$CCGS_ROOT" 2>/dev/null || true
+if [ -f .claude/hooks/path-security.sh ]; then
+    . .claude/hooks/path-security.sh
+fi
 
 # Claude Code PreCompact hook: Dump session state before context compression
 # This output appears in the conversation right before compaction, ensuring
@@ -59,13 +62,19 @@ echo "Timestamp: $(date)"
 # So: emit only the region between the CHECKPOINT markers (bounded by the schema
 # in .claude/docs/templates/session-state.md) plus a pointer to the whole file.
 STATE_FILE="production/session-state/active.md"
-if [ -f "$STATE_FILE" ]; then
+STATE_LOADED=false
+if command -v ccgs_session_state_path_present >/dev/null 2>&1 \
+    && ccgs_session_state_path_present "$CCGS_ROOT"; then
+  if STATE_CONTENT=$(ccgs_read_session_state "$CCGS_ROOT"); then
+    STATE_LOADED=true
     echo ""
     echo "## Active Session State — checkpoint from $STATE_FILE"
-    CHECKPOINT=$(sed -n '/<!-- CHECKPOINT -->/,/<!-- \/CHECKPOINT -->/p' "$STATE_FILE" 2>/dev/null \
-                 | grep -v '<!-- /\?CHECKPOINT -->')
-    STATUS_BLOCK=$(sed -n '/<!-- STATUS -->/,/<!-- \/STATUS -->/p' "$STATE_FILE" 2>/dev/null \
-                   | grep -v '<!-- /\?STATUS -->' | grep -E '^(Epic|Feature|Task):[[:space:]]*[^[:space:]]')
+    CHECKPOINT=$(printf '%s\n' "$STATE_CONTENT" \
+                 | sed -n '/<!-- CHECKPOINT -->/,/<!-- \/CHECKPOINT -->/p' \
+                  | grep -v '<!-- /\?CHECKPOINT -->')
+    STATUS_BLOCK=$(printf '%s\n' "$STATE_CONTENT" \
+                   | sed -n '/<!-- STATUS -->/,/<!-- \/STATUS -->/p' \
+                    | grep -v '<!-- /\?STATUS -->' | grep -E '^(Epic|Feature|Task):[[:space:]]*[^[:space:]]')
     [ -n "$STATUS_BLOCK" ] && printf '%s\n' "$STATUS_BLOCK"
     if [ -n "$CHECKPOINT" ]; then
         printf '%s\n' "$CHECKPOINT"
@@ -75,10 +84,15 @@ if [ -f "$STATE_FILE" ]; then
         # checkpoint is a real problem the user should fix, not absorb silently.
         echo "(no CHECKPOINT block — showing the first 20 lines instead;"
         echo " re-create this file from .claude/docs/templates/session-state.md)"
-        head -n 20 "$STATE_FILE"
+        printf '%s\n' "$STATE_CONTENT" | head -n 20
     fi
     echo ""
-    echo "Full detail (NOT reproduced here — read the file if you need it): $STATE_FILE"
+    echo "The original file was not reopened after its validated snapshot was captured."
+  else
+    echo ""
+    echo "## Session state rejected by security validation"
+    echo "Automatic checkpoint recovery was skipped."
+  fi
 else
     echo ""
     echo "## No active session state file found"
@@ -167,7 +181,11 @@ echo "Context compaction occurred at $(date)." \
 
 echo ""
 echo "## Recovery Instructions"
-echo "After compaction, read $STATE_FILE to recover full working context."
+if [ "$STATE_LOADED" = true ]; then
+    echo "After compaction, use the validated checkpoint emitted above."
+else
+    echo "No validated checkpoint is available for automatic recovery."
+fi
 echo "Then read any files listed above that are being actively worked on."
 echo "=== END SESSION STATE ==="
 

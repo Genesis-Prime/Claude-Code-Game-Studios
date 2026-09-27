@@ -8,6 +8,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/Genesis-Prime/Claude-Code-Game-Studios/actions/workflows/ci.yml"><img src="https://github.com/Genesis-Prime/Claude-Code-Game-Studios/actions/workflows/ci.yml/badge.svg" alt="CI status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href=".claude/agents"><img src="https://img.shields.io/badge/agents-49-blueviolet" alt="49 Agents"></a>
   <a href=".claude/skills"><img src="https://img.shields.io/badge/skills-74-green" alt="74 Skills"></a>

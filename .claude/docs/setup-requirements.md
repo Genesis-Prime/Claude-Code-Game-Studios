@@ -16,7 +16,7 @@ you'll lose validation features.
 | Tool | Used By | Purpose | Install |
 | ---- | ---- | ---- | ---- |
 | **jq** | Hooks (7 of 12) | JSON parsing in commit/push/asset/agent hooks | See below |
-| **Python 3** | Hooks (2 of 12) | JSON validation for data files | [python.org](https://www.python.org/) |
+| **Python 3 with `-I` isolated mode** | Hooks and config helpers | Safe config parsing, JSON validation, and session checkpoint snapshots | [python.org](https://www.python.org/) |
 | **Bash** | All hooks | Shell script execution | Included with Git for Windows |
 
 ### Installing jq
@@ -69,7 +69,7 @@ python3 --version      # Should show python version (optional)
 | Missing Tool | Effect |
 | ---- | ---- |
 | **jq** | Commit validation, push protection, asset validation, and agent audit hooks silently skip their checks. Commits and pushes still work. |
-| **Python 3** | JSON data file validation in commit and asset hooks is skipped. Invalid JSON can be committed without warning. |
+| **Python 3 with `-I`** | Config parsing and JSON validation report that they could not run. Automatic session checkpoint previews and archives are skipped rather than reading an untrusted path. |
 | **Both** | All hooks still execute without error (exit 0) but provide no validation. You're flying without safety nets. |
 
 ## Optional Performance Settings

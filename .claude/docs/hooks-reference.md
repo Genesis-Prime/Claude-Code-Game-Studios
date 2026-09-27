@@ -7,15 +7,23 @@ Hooks are configured in `.claude/settings.json` and fire automatically:
 | `validate-commit.sh` | PreToolUse (Bash) | `git commit` commands | Validates design doc sections, JSON data files, hardcoded values, TODO format |
 | `validate-push.sh` | PreToolUse (Bash) | `git push` commands | Warns on pushes to protected branches (develop/main) |
 | `validate-assets.sh` | PostToolUse (Write/Edit) | Asset file changes | Checks naming conventions and JSON validity for files in `assets/` |
-| `session-start.sh` | SessionStart | Session begins | Loads sprint context, milestone, git activity; detects and previews active session state file for recovery |
+| `session-start.sh` | SessionStart | Session begins | Loads sprint context, milestone, git activity; previews a validated snapshot of active session state for recovery |
 | `detect-gaps.sh` | SessionStart | Session begins | Detects fresh projects (suggests /start) and missing documentation when code/prototypes exist, suggests /reverse-document or /project-stage-detect |
-| `pre-compact.sh` | PreCompact | Context compression | Dumps session state (active.md, modified files, WIP design docs) into conversation before compaction so it survives summarization |
-| `post-compact.sh` | PostCompact | After compaction | Reminds Claude to restore session state from `active.md` checkpoint |
+| `pre-compact.sh` | PreCompact | Context compression | Emits a validated checkpoint snapshot, modified files, and WIP design docs before compaction |
+| `post-compact.sh` | PostCompact | After compaction | Re-emits the validated checkpoint snapshot after compaction without instructing a direct path read |
 | `notify.sh` | Notification | Notification event | Shows Windows toast notification via PowerShell |
-| `session-stop.sh` | Stop | **Every response ends** — not once per session | Summarizes accomplishments, updates session log, and writes the subagent spawn tally to `production/session-logs/session-cost.md`. Archives `active.md` only when its content hash changed; without that guard a long session appended the whole file on every turn. |
+| `session-stop.sh` | Stop | **Every response ends** — not once per session | Summarizes accomplishments, updates session log, and writes the subagent spawn tally to `production/session-logs/session-cost.md`. Archives a validated snapshot of `active.md` only when its content hash changed. |
 | `log-agent.sh` | SubagentStart | Agent spawned | Audit trail start — logs subagent invocation with timestamp and session id |
 | `log-agent-stop.sh` | SubagentStop | Agent stops | Audit trail stop — completes subagent record |
 | `validate-skill-change.sh` | PostToolUse (Write/Edit) | Skill file changes | Advises running `/skill-test` after any `.claude/skills/` file is written or edited |
+
+`path-security.sh` and `read-session-state.py` form the shared checkpoint read
+boundary used by SessionStart, PreCompact, PostCompact, Stop, and the status
+line. The helper rejects symlinks, Windows junctions and other reparse points,
+hard links, non-regular files, files larger than 1 MiB, path or content changes
+during the read, and NUL bytes. Callers use the bytes read from one validated
+descriptor and never reopen `active.md`.
+Without Python 3 isolated mode, automatic checkpoint consumption fails closed.
 
 ### Subagent cost visibility
 

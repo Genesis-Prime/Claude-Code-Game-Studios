@@ -26,6 +26,9 @@ else
   CCGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
 fi
 [ -n "$CCGS_ROOT" ] && cd "$CCGS_ROOT" 2>/dev/null || true
+if [ -f .claude/hooks/path-security.sh ]; then
+    . .claude/hooks/path-security.sh
+fi
 
 # post-compact.sh — fires after conversation compaction
 # Reminds Claude to restore session state from the file-backed checkpoint.
@@ -41,11 +44,23 @@ ACTIVE="production/session-state/active.md"
 
 echo "=== Context Restored After Compaction ==="
 
-if [ -f "$ACTIVE" ]; then
-  SIZE=$(wc -l < "$ACTIVE" 2>/dev/null || echo "?")
-  echo "Session state file exists: $ACTIVE ($SIZE lines)"
-  echo "IMPORTANT: Read this file now to restore your working context."
-  echo "It contains: current task, decisions made, files in progress, open questions."
+if command -v ccgs_session_state_path_present >/dev/null 2>&1 \
+    && ccgs_session_state_path_present "$CCGS_ROOT"; then
+  if STATE_CONTENT=$(ccgs_read_session_state "$CCGS_ROOT"); then
+    SIZE=$(printf '%s' "$STATE_CONTENT" | awk 'END { print NR }')
+    CHECKPOINT=$(printf '%s\n' "$STATE_CONTENT" \
+                 | sed -n '/<!-- CHECKPOINT -->/,/<!-- \/CHECKPOINT -->/p' \
+                 | grep -v '<!-- /\?CHECKPOINT -->')
+    echo "Validated session checkpoint: $ACTIVE ($SIZE lines)"
+    if [ -n "$CHECKPOINT" ]; then
+      printf '%s\n' "$CHECKPOINT"
+    else
+      echo "No CHECKPOINT block found; showing the first 20 validated lines:"
+      printf '%s\n' "$STATE_CONTENT" | head -20
+    fi
+  else
+    echo "Session state exists but failed security validation; automatic recovery skipped."
+  fi
 else
   echo "No session state file found at $ACTIVE"
   echo "If you were mid-task, check production/session-logs/ for the last session audit."

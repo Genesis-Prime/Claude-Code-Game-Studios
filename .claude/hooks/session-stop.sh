@@ -26,6 +26,9 @@ else
   CCGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
 fi
 [ -n "$CCGS_ROOT" ] && cd "$CCGS_ROOT" 2>/dev/null || true
+if [ -f .claude/hooks/path-security.sh ]; then
+    . .claude/hooks/path-security.sh
+fi
 
 # Claude Code Stop hook: Log session summary when Claude finishes
 # Records what was worked on for audit trail and sprint tracking
@@ -70,16 +73,25 @@ MODIFIED_FILES=$(git diff --name-only 2>/dev/null)
 # failure direction is a duplicate entry, never a lost one.
 STATE_FILE="production/session-state/active.md"
 STATE_HASH_FILE="$SESSION_LOG_DIR/.active-state.hash"
-if [ -f "$STATE_FILE" ]; then
-    STATE_HASH=$(git hash-object -- "$STATE_FILE" 2>/dev/null)
-    if [ -z "$STATE_HASH" ] || [ "$STATE_HASH" != "$(cat "$STATE_HASH_FILE" 2>/dev/null)" ]; then
-        {
-            echo "## Archived Session State: $TIMESTAMP"
-            cat "$STATE_FILE"
-            echo "---"
-            echo ""
-        } >> "$SESSION_LOG_DIR/session-log.md" 2>/dev/null
-        [ -n "$STATE_HASH" ] && printf '%s\n' "$STATE_HASH" > "$STATE_HASH_FILE" 2>/dev/null
+if command -v ccgs_session_state_path_present >/dev/null 2>&1 \
+    && ccgs_session_state_path_present "$CCGS_ROOT"; then
+    STATE_SNAPSHOT=$(mktemp "$SESSION_LOG_DIR/.active-state.XXXXXX" 2>/dev/null)
+    if [ -n "$STATE_SNAPSHOT" ]; then
+        trap '[ -n "${STATE_SNAPSHOT:-}" ] && rm -f -- "$STATE_SNAPSHOT"' EXIT
+        if ccgs_read_session_state "$CCGS_ROOT" > "$STATE_SNAPSHOT"; then
+            STATE_HASH=$(git hash-object -- "$STATE_SNAPSHOT" 2>/dev/null)
+            if [ -z "$STATE_HASH" ] || [ "$STATE_HASH" != "$(cat "$STATE_HASH_FILE" 2>/dev/null)" ]; then
+                {
+                    echo "## Archived Session State: $TIMESTAMP"
+                    cat "$STATE_SNAPSHOT"
+                    echo "---"
+                    echo ""
+                } >> "$SESSION_LOG_DIR/session-log.md" 2>/dev/null
+                [ -n "$STATE_HASH" ] && printf '%s\n' "$STATE_HASH" > "$STATE_HASH_FILE" 2>/dev/null
+            fi
+        fi
+        rm -f -- "$STATE_SNAPSHOT"
+        STATE_SNAPSHOT=""
     fi
 fi
 
