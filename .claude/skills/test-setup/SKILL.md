@@ -337,8 +337,9 @@ name: Automated Tests
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+
+# Do not add a pull request trigger to this job. It executes repository code on
+# a self-hosted machine and is intentionally limited to trusted, merged code.
 
 jobs:
   test:
@@ -367,8 +368,13 @@ jobs:
           path: Saved/Logs/
 ```
 
-Note: UE CI requires a self-hosted runner with Unreal Editor installed.
-Set the `UE_EDITOR_PATH` environment variable on the runner.
+Note: UE CI requires a self-hosted runner with Unreal Editor installed. Set the
+`UE_EDITOR_PATH` environment variable on the runner. Keep persistent runners
+restricted to trusted events such as pushes to protected branches. If pull
+request testing is required, use a separate workflow and runner fleet that is
+ephemeral, isolated per job, contains no credentials beyond the job's minimal
+read-only token, and is destroyed after execution. Never run pull request code
+on a persistent Unreal build machine.
 
 ---
 
