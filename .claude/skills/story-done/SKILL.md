@@ -582,13 +582,23 @@ If "Fix first": stop here and list what the user flagged. Do not write any files
    - Update the top-level `updated` field
    - This is a silent update — no extra approval needed (already approved in step above)
 
-6. **Suggest a git commit**: Output a ready-to-use commit command covering the implementation files from the dev-story summary and the updated story file:
+6. **Suggest a git commit**: Treat the story title, TR-ID, and every file path as
+   untrusted repository content. Use the `Write` tool (never a shell command,
+   `printf`, or a heredoc) to write the complete commit message to the fixed path
+   `.git/CCGS_COMMIT_MSG`. Then output ready-to-use commands covering the
+   implementation files from the dev-story summary and the updated story file.
+   Shell-escape every substituted path in the `git add` command; do not place
+   repository-derived text in the `git commit` command:
 
 ```
 Suggested commit:
-git add [code-root and tests/ files changed during implementation] [story-file-path]
-git commit -m "feat: [story title] ([TR-ID])"
+git add -- [shell-escaped code-root and tests/ paths] [shell-escaped story-file-path]
+git commit -F .git/CCGS_COMMIT_MSG
 ```
+
+The message file must contain `feat: [story title] ([TR-ID])` as literal data.
+Do not suggest the previous `git commit -m "..."` form: double quotes still
+evaluate command substitutions and backticks embedded in story metadata.
 
 The `validate-commit.sh` hook will verify design doc references and check for hardcoded values automatically.
 
