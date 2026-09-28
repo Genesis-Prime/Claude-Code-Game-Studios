@@ -80,11 +80,11 @@ printf 'FAKE_TOKEN_DO_NOT_PRINT\n' > "$secret"
 if ln -s "$secret" "$project/production/stage.txt" 2>/dev/null \
     && ln -s "$secret" "$project/production/review-mode.txt" 2>/dev/null; then
   legacy_output=$(cd "$project" && printf '{"source":"startup"}\n' \
-    | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/session-start.sh 2>&1)
+    | CLAUDE_PROJECT_DIR="$project" "$test_bash" .claude/hooks/session-start.sh 2>&1)
   assert_not_contains "$legacy_output" "FAKE_TOKEN_DO_NOT_PRINT" "SessionStart disclosed a linked legacy file"
   assert_contains "$legacy_output" "Ignored linked, redirected, or non-regular" "SessionStart did not report a rejected legacy link"
   status_output=$(cd "$project" && printf '{"model":{"display_name":"test"},"workspace":{"current_dir":"%s"}}\n' "$project" \
-    | CLAUDE_PROJECT_DIR="$project" bash .claude/statusline.sh 2>&1)
+    | CLAUDE_PROJECT_DIR="$project" "$test_bash" .claude/statusline.sh 2>&1)
   assert_not_contains "$status_output" "FAKE_TOKEN_DO_NOT_PRINT" "status line disclosed a linked legacy file"
   rm -f "$project/production/stage.txt" "$project/production/review-mode.txt"
 fi
@@ -93,11 +93,11 @@ fi
 # SessionStart consumer, while a legacy-only project still reads a safe value.
 printf 'solo\n' > "$project/production/review-mode.txt"
 printf 'schema_version: 1\n' > "$project/project.yaml"
-review_output=$(cd "$project" && CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/session-start.sh 2>&1)
+review_output=$(cd "$project" && CLAUDE_PROJECT_DIR="$project" "$test_bash" .claude/hooks/session-start.sh 2>&1)
 assert_contains "$review_output" "Review mode: lean" "SessionStart let legacy review mode override project.yaml"
 assert_not_contains "$review_output" "Review mode: solo" "SessionStart consulted legacy review mode with project.yaml present"
 rm -f "$project/project.yaml"
-legacy_review_output=$(cd "$project" && CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/session-start.sh 2>&1)
+legacy_review_output=$(cd "$project" && CLAUDE_PROJECT_DIR="$project" "$test_bash" .claude/hooks/session-start.sh 2>&1)
 assert_contains "$legacy_review_output" "Review mode: solo" "legacy-only review mode no longer resolves"
 rm -f "$project/production/review-mode.txt"
 
@@ -165,7 +165,7 @@ sed -i.bak 's/allowed-tools: /allowed-tools: Bash, /' "$skill" 2>/dev/null || tr
 rm -f "$skill.bak"
 skill_event=$(printf '{"tool_input":{"file_path":"%s"}}\n' "$skill")
 skill_warning=$(cd "$project" && printf '%s\n' "$skill_event" \
-  | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-skill-change.sh 2>&1)
+  | CLAUDE_PROJECT_DIR="$project" "$test_bash" .claude/hooks/validate-skill-change.sh 2>&1)
 assert_contains "$skill_warning" "SECURITY REVIEW REQUIRED" "allowed-tools change emitted no security warning"
 
 # F11: terminal/log values lose controls and untrusted agent names cannot forge
@@ -177,7 +177,7 @@ sanitized=$(
 )
 [ "$sanitized" = "safe]52;payloadforged" ] || fail "terminal sanitizer retained controls or line breaks"
 agent_event='{"session_id":"s1","agent_type":"bad|row"}'
-printf '%s\n' "$agent_event" | CLAUDE_PROJECT_DIR="$project" bash "$project/.claude/hooks/log-agent.sh" >/dev/null 2>&1
+printf '%s\n' "$agent_event" | CLAUDE_PROJECT_DIR="$project" "$test_bash" "$project/.claude/hooks/log-agent.sh" >/dev/null 2>&1
 audit=$(
   cd "$project" || exit 1
   . .claude/hooks/path-security.sh

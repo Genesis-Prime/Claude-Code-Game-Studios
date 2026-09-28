@@ -179,7 +179,7 @@ mkdir -p "$project/production"
 printf 'Concept\n' > "$project/production/stage.txt"
 rm -f "$project/project.yaml"
 if ln -s "$outside" "$project/project.yaml" 2>/dev/null; then
-  if (cd "$project" && bash .claude/scripts/migrate-v1-config.sh >/dev/null 2>&1); then
+  if (cd "$project" && "$test_bash" .claude/scripts/migrate-v1-config.sh >/dev/null 2>&1); then
     fail "migration accepted a symlinked project.yaml"
   fi
   [ "$(cat "$outside")" = "preserve" ] || fail "migration overwrote a symlink target"
@@ -200,7 +200,7 @@ modes:
   review_mode: lean
 YAML
 if ln -s "$outside_production" "$linked_project/production" 2>/dev/null; then
-  if (cd "$linked_project" && bash .claude/scripts/migrate-v1-config.sh --finalize >/dev/null 2>&1); then
+  if (cd "$linked_project" && "$test_bash" .claude/scripts/migrate-v1-config.sh --finalize >/dev/null 2>&1); then
     fail "migration finalized through a linked production directory"
   fi
   [ -f "$outside_production/stage.txt" ] || fail "migration deleted external stage through a linked parent"
