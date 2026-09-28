@@ -182,8 +182,9 @@ else
   if [ -z "$PHYSICS" ]; then
     skipped "physics — project.yaml has no engine.physics"
   elif printf '%s' "$PHYSICS" | grep -qiE 'jolt'; then
-    if grep -qE '(Node2D|CharacterBody2D|RigidBody2D|Area2D|StaticBody2D)' \
-         $(find src -name '*.gd' -o -name '*.tscn' 2>/dev/null) /dev/null 2>/dev/null; then
+    if find "$REPO/src" -type f \( -name '*.gd' -o -name '*.tscn' \) \
+         -exec grep -lE '(Node2D|CharacterBody2D|RigidBody2D|Area2D|StaticBody2D)' {} + \
+         2>/dev/null | grep -q .; then
       differs "engine.physics is 'Jolt', but 2D nodes were found under src/. Jolt is Godot's default 3D engine; 2D still uses Godot Physics 2D (docs/engine-reference/godot/modules/physics.md)."
     else
       match "engine.physics ($PHYSICS) — no 2D nodes found under src/ to contradict it"

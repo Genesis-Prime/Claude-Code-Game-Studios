@@ -155,11 +155,17 @@ fi
   || fail "path-security defaulted to the caller working directory"
 
 # Safety categories are an immutable baseline and specialist values are typed.
+cat > "$project/typed-command-helper.py" <<'PY'
+import os
+
+assert "CCGS_SHOULD_NOT_LEAK" not in os.environ
+open("typed-command-ran", "w", encoding="utf-8").write("ok")
+PY
 cat >> "$project/project.yaml" <<EOF
 modes:
   automation_always_ask: [unknown_only]
 commands: # typed argv profiles
-  test: ["$test_python", "-I", "-c", "import os; assert 'CCGS_SHOULD_NOT_LEAK' not in os.environ; open('typed-command-ran', 'w').write('ok')"]
+  test: ["$test_python", "-I", "typed-command-helper.py"]
 EOF
 if ! (
   cd "$project" || exit 1
@@ -287,9 +293,13 @@ if (cd "$project" && printf '%s\n' "$config_env_alias" | CLAUDE_PROJECT_DIR="$pr
   fail "--config-env Git alias bypassed commit classification"
 fi
 commit_tree='{"tool_name":"Bash","tool_input":{"command":"git commit-tree HEAD^{tree}"}}'
-if ! (cd "$project" && printf '%s\n' "$commit_tree" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
-  fail "git commit-tree was misclassified as git commit"
-fi
+commit_tree_output=$(cd "$project" && printf '%s\n' "$commit_tree" \
+  | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh) \
+  || fail "git commit-tree hook failed instead of asking"
+assert_contains "$commit_tree_output" '"permissionDecision":"ask"' \
+  "git commit-tree did not request confirmation"
+assert_contains "$commit_tree_output" 'creates commits without staged-file validation' \
+  "git commit-tree ask decision omitted its reason"
 ambiguous_commit='{"tool_name":"Bash","tool_input":{"command":"sh -c '\''git commit'\''"}}'
 if (cd "$project" && printf '%s\n' "$ambiguous_commit" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
   fail "ambiguous nested Git commit was allowed"

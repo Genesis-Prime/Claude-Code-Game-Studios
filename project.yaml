@@ -22,5 +22,5 @@ framework:
 # same rule for the file it writes.
 #
 # Per-developer preferences belong in `project.local.yaml` (gitignored), not
-# here. `/settings <key>=<value>` writes there. See
+# here. `/settings --local <key>=<value>` writes there. See
 # `.claude/docs/config-resolution.md` for the full precedence order.

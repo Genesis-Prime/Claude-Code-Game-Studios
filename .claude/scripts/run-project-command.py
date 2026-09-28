@@ -29,6 +29,22 @@ ALLOWED_ENVIRONMENT = {
 LINE = re.compile(r"^  (build|test|run|smoke):[ \t]*(\[.*\])[ \t]*(?:#.*)?$")
 COMMANDS_HEADER = re.compile(r"^commands:[ \t]*(?:#.*)?$")
 REPARSE_POINT_ATTRIBUTE = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+SHELL_INLINE_FLAGS = {
+    "sh": {"-c"},
+    "bash": {"-c"},
+    "zsh": {"-c"},
+    "dash": {"-c"},
+    "ksh": {"-c"},
+    "fish": {"-c"},
+    "pwsh": {"-command", "-c", "-encodedcommand"},
+    "powershell": {"-command", "-c", "-encodedcommand"},
+    "cmd": {"/c", "/k"},
+    "node": {"-e", "-p", "--eval"},
+    "perl": {"-e"},
+    "ruby": {"-e"},
+    "php": {"-r"},
+    "osascript": {"-e"},
+}
 
 
 class CommandError(Exception):
@@ -157,6 +173,60 @@ def _clean_environment():
     return result
 
 
+def _command_basename(value):
+    name = os.path.basename(value).lower()
+    if name.endswith((".exe", ".cmd", ".bat", ".com")):
+        name = os.path.splitext(name)[0]
+    return name
+
+
+def _reject_inline_code(argv):
+    inspected = list(argv)
+    while _command_basename(inspected[0]) == "env":
+        index = 1
+        while index < len(inspected):
+            value = inspected[index]
+            if value == "--":
+                index += 1
+                break
+            if value in ("-u", "--unset"):
+                index += 2
+                continue
+            if value.startswith("--unset=") or value in ("-i", "--ignore-environment"):
+                index += 1
+                continue
+            if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", value):
+                index += 1
+                continue
+            if value.startswith("-"):
+                raise CommandError("project command uses an unsupported env wrapper option")
+            break
+        if index >= len(inspected):
+            raise CommandError("project command env wrapper has no executable")
+        inspected = inspected[index:]
+
+    name = _command_basename(inspected[0])
+    args = [value.lower() for value in inspected[1:]]
+    flags = set(args)
+    if (name == "python" or name.startswith("python") or name == "py") \
+            and any(value == "-c" or value.startswith("-c") for value in args):
+        raise CommandError("inline interpreter code is not allowed in project commands")
+    blocked = SHELL_INLINE_FLAGS.get(name, set())
+    if name in {"sh", "bash", "zsh", "dash", "ksh", "fish"} and any(
+            value.startswith("-") and not value.startswith("--") and "c" in value[1:]
+            for value in args):
+        raise CommandError("inline shell or interpreter code is not allowed in project commands")
+    attached = any(
+        any(value == flag or value.startswith(flag + "=")
+            or (len(flag) == 2 and value.startswith(flag) and len(value) > 2)
+            or (flag in ("-command", "-encodedcommand") and value.startswith(flag))
+            for flag in blocked)
+        for value in args
+    )
+    if blocked.intersection(flags) or attached:
+        raise CommandError("inline shell or interpreter code is not allowed in project commands")
+
+
 def _executable_identity(requested, root, environment):
     has_separator = os.sep in requested or (os.altsep is not None and os.altsep in requested)
     if has_separator or os.path.isabs(requested):
@@ -166,7 +236,12 @@ def _executable_identity(requested, root, environment):
             (value for key, value in environment.items() if key.upper() == "PATH"),
             None,
         )
-        candidate = shutil.which(requested, path=search_path)
+        safe_entries = []
+        for entry in (search_path or "").split(os.pathsep):
+            if not entry or not os.path.isabs(entry):
+                continue
+            safe_entries.append(entry)
+        candidate = shutil.which(requested, path=os.pathsep.join(safe_entries))
     if not candidate:
         raise CommandError("command executable could not be resolved")
     resolved = os.path.realpath(os.path.abspath(candidate))
@@ -259,6 +334,7 @@ def main():
         if args.timeout < 1 or args.timeout > 1800:
             raise CommandError("timeout must be between 1 and 1800 seconds")
         argv = profiles[args.name] + _extra(args.extra_json)
+        _reject_inline_code(argv)
         environment = _clean_environment()
         executable = _executable_identity(argv[0], root, environment)
         payload, digest = _receipt(args.name, argv, args.timeout, executable, environment)

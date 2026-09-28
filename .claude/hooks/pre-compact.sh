@@ -42,31 +42,11 @@ STATE_FILE="production/session-state/active.md"
 STATE_LOADED=false
 if command -v ccgs_session_state_path_present >/dev/null 2>&1 \
     && ccgs_session_state_path_present "$CCGS_ROOT"; then
-  if STATE_CONTENT=$(ccgs_read_session_state "$CCGS_ROOT"); then
+  echo ""
+  echo "## Active Session State — checkpoint from $STATE_FILE"
+  if ccgs_emit_checkpoint "$CCGS_ROOT"; then
     STATE_LOADED=true
-    echo ""
-    echo "## Active Session State — checkpoint from $STATE_FILE"
-    CHECKPOINT=$(printf '%s\n' "$STATE_CONTENT" \
-                 | sed -n '/<!-- CHECKPOINT -->/,/<!-- \/CHECKPOINT -->/p' \
-                  | grep -v '<!-- /\?CHECKPOINT -->')
-    STATUS_BLOCK=$(printf '%s\n' "$STATE_CONTENT" \
-                   | sed -n '/<!-- STATUS -->/,/<!-- \/STATUS -->/p' \
-                    | grep -v '<!-- /\?STATUS -->' | grep -E '^(Epic|Feature|Task):[[:space:]]*[^[:space:]]')
-    [ -n "$STATUS_BLOCK" ] && printf '%s\n' "$STATUS_BLOCK"
-    if [ -n "$CHECKPOINT" ]; then
-        printf '%s\n' "$CHECKPOINT"
-    else
-        # No markers: an unmigrated or hand-written file. Fall back to a small
-        # head slice rather than nothing -- but say so, because a missing
-        # checkpoint is a real problem the user should fix, not absorb silently.
-        echo "(no CHECKPOINT block — showing the first 20 lines instead;"
-        echo " re-create this file from .claude/docs/templates/session-state.md)"
-        printf '%s\n' "$STATE_CONTENT" | head -n 20
-    fi
-    echo ""
-    echo "The original file was not reopened after its validated snapshot was captured."
   else
-    echo ""
     echo "## Session state rejected by security validation"
     echo "Automatic checkpoint recovery was skipped."
   fi
@@ -98,7 +78,10 @@ _pc_list() { # $1=label  $2=newline-separated paths
     [ -n "$2" ] || return 0
     _n=$(printf '%s\n' "$2" | grep -c .)
     echo "$1 ($_n):"
-    printf '%s\n' "$2" | head -n "$_PC_CAP" | while read -r f; do [ -n "$f" ] && echo "  - $f"; done
+    printf '%s\n' "$2" | head -n "$_PC_CAP" | while read -r f; do
+        f=$(printf '%s' "$f" | ccgs_sanitize_text 240)
+        [ -n "$f" ] && echo "  - $f"
+    done
     if [ "$_n" -gt "$_PC_CAP" ]; then
         echo "  ... and $((_n - _PC_CAP)) more (run: git status)"
     fi
@@ -139,6 +122,7 @@ if [ -n "$_WIP_HITS" ]; then
     _wn=$(printf '%s\n' "$_WIP_HITS" | grep -c .)
     echo "$_wn design doc(s) contain TODO/WIP/PLACEHOLDER markers:"
     printf '%s\n' "$_WIP_HITS" | head -n "$_PC_CAP" | while read -r f; do
+        f=$(printf '%s' "$f" | ccgs_sanitize_text 240)
         [ -n "$f" ] && echo "  - $f"
     done
     if [ "$_wn" -gt "$_PC_CAP" ]; then

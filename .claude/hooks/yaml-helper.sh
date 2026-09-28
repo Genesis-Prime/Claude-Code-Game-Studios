@@ -26,7 +26,7 @@
 #
 #   validate_yaml_enum <file>
 #     Validates known enum-typed keys in <file> against their allowed
-#     value sets (12 enums hardcoded below). Prints one error line per
+#     value sets hardcoded below. Prints one error line per
 #     invalid value to stderr. Returns 1 if any invalid value found,
 #     0 otherwise. Unknown-key (typo) detection is a future sub-phase —
 #     enum errors are the critical-path block per the spec.
@@ -34,12 +34,12 @@
 #   validate_local_yaml_base
 #     Hard-error guard per spec: project.local.yaml requires a project.yaml
 #     base. Returns 1 with error on stderr if local exists without base.
-#     Uses CWD-relative paths.
+#     Uses paths anchored to this helper's repository root.
 #
 #   is_locally_overridable <dotted.path>
 #     Whitelist check for the /settings --local flag. Returns 0 if the
-#     setting is on the personal-experience whitelist (12 settings per
-#     effects-map.md), 1 otherwise. Locked settings cannot be locally
+#     setting is on the personal-experience whitelist in effects-map.md,
+#     1 otherwise. Settings outside that whitelist cannot be locally
 #     overridden because they affect on-disk artifacts.
 #
 #   validate_enum_value <dotted.path> <value>
@@ -78,6 +78,7 @@
 # the only authority for project configuration and automatic writes.
 _YH_SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
 _YH_TRUSTED_ROOT="$(CDPATH= cd -- "$_YH_SCRIPT_DIR/../.." 2>/dev/null && pwd -P)"
+. "$_YH_SCRIPT_DIR/path-security.sh" 2>/dev/null || true
 
 # Resolve a working Python interpreter once per shell, cache the result.
 _yaml_helper_python=""
@@ -125,11 +126,11 @@ def parse(lines):
         if not stack:
             return root
         parent = stack[-1][1]
-        m = re.match(r'([^:#\s][^:]*?)\s*:\s*(.*)$', stripped)
-        if not m:
+        if not stripped or stripped[0] in ' \t#:' or ':' not in stripped:
             continue
-        key = m.group(1).strip()
-        value = m.group(2).strip()
+        key, _, value = stripped.partition(':')
+        key = key.strip()
+        value = value.strip()
         # Resolve the scalar: handle comment-only, quoted, and inline-comment forms.
         if value.startswith('#'):
             value = ''
@@ -153,8 +154,27 @@ def parse(lines):
     return root
 
 try:
-    with open(path_file, 'r', encoding='utf-8-sig', errors='replace') as f:
-        data = parse(f.readlines())
+    import os, stat
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(path_file, flags)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            sys.stderr.write("yaml-helper: config is not a regular file\n")
+            sys.exit(0)
+        if info.st_size > 256 * 1024:
+            sys.stderr.write("yaml-helper: config exceeds the 256 KiB safety limit\n")
+            sys.exit(0)
+        with os.fdopen(descriptor, 'r', encoding='utf-8-sig', errors='replace') as f:
+            descriptor = -1
+            raw_lines = f.readlines()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if any(len(line) > 4096 for line in raw_lines):
+        sys.stderr.write("yaml-helper: config contains a line over the 4 KiB safety limit\n")
+        sys.exit(0)
+    data = parse(raw_lines)
 except OSError:
     sys.exit(0)
 
@@ -218,12 +238,12 @@ def parse(lines):
         if not stack:
             return root
         parent = stack[-1][1]
-        m = re.match(r'([^:#\s][^:]*?)\s*:\s*(.*)$', stripped)
-        if not m:
+        if not stripped or stripped[0] in ' \t#:' or ':' not in stripped:
             i += 1
             continue
-        key = m.group(1).strip()
-        value = m.group(2).strip()
+        key, _, value = stripped.partition(':')
+        key = key.strip()
+        value = value.strip()
         if value.startswith('#'):
             value = ''
         elif value[:1] == '[':
@@ -334,8 +354,27 @@ def parse(lines):
     return root
 
 try:
-    with open(path_file, 'r', encoding='utf-8-sig', errors='replace') as f:
-        data = parse(f.readlines())
+    import os, stat
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(path_file, flags)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            sys.stderr.write("yaml-helper: config is not a regular file\n")
+            sys.exit(0)
+        if info.st_size > 256 * 1024:
+            sys.stderr.write("yaml-helper: config exceeds the 256 KiB safety limit\n")
+            sys.exit(0)
+        with os.fdopen(descriptor, 'r', encoding='utf-8-sig', errors='replace') as f:
+            descriptor = -1
+            raw_lines = f.readlines()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if any(len(line) > 4096 for line in raw_lines):
+        sys.stderr.write("yaml-helper: config contains a line over the 4 KiB safety limit\n")
+        sys.exit(0)
+    data = parse(raw_lines)
 except OSError:
     sys.exit(0)
 
@@ -359,7 +398,7 @@ PYEOF
 # has no meaning without a base — it only overrides values from project.yaml.
 # Prints a hard-error message to stderr and returns 1 if the orphan case
 # is detected. Returns 0 otherwise (including when neither file exists).
-# Uses CWD-relative paths — callers cd into the project root first.
+# Uses paths anchored to the helper's authenticated repository root.
 # --- project root resolution -------------------------------------------------
 #
 # Configuration is always resolved inside the repository that contains this
@@ -389,11 +428,14 @@ get_effective_yaml_key() {
   local path="$1"
   if [ -z "$path" ]; then return 0; fi
   local val=""
-  if [ -f "$_YH_ROOT/project.local.yaml" ]; then
+  if _yaml_helper_in_local_read_scope "$path" && [ -f "$_YH_ROOT/project.local.yaml" ]; then
     val=$(get_yaml_key "$_YH_ROOT/project.local.yaml" "$path")
   fi
   if [ -z "$val" ] && [ -f "$_YH_ROOT/project.yaml" ]; then
     val=$(get_yaml_key "$_YH_ROOT/project.yaml" "$path")
+    if [ -n "$val" ] && ! _yaml_helper_committed_value_allowed "$path" "$val"; then
+      val=""
+    fi
   fi
   printf '%s' "$val"
 }
@@ -412,7 +454,7 @@ get_effective_yaml_array() {
   printf '%s' "$val"
 }
 
-# Enum constants — the 12 settings whose values are constrained to a
+# Enum constants — settings whose values are constrained to a
 # fixed set per effects-map.md. Format: dotted.path::value1|value2|...
 # Validation: walk this list; for each key present in the file, verify
 # value is in the allowed set. Out-of-set values are hard errors per
@@ -439,6 +481,7 @@ testing.strict.integration::true|false
 testing.strict.visual::true|false
 testing.strict.ui::true|false
 testing.strict.config::true|false
+testing.strict::true|false
 features.session_state::on|off
 platform.online::true|false
 workflow_overrides.edge_cases::true|false
@@ -460,11 +503,9 @@ workflow_overrides.art_bible_strict::true|false"
 #     above as `on|off` because `session_state_enabled()` disables only on the
 #     literal `off`, and effects-map documents `on`/`off`. Writing `false` there
 #     means ENABLED, which is why validating it matters.
-#   - `testing.strict` (the parent) is absent because its primary shape is a MAP
-#     of the five type keys; the bare scalar is only a back-compat form. Its
-#     effects-map `**Values:**` line documents the map, so enumerating the parent
-#     as a scalar would force that line to misdescribe the real shape. The five
-#     leaves below carry the validation, which is where /story-done reads.
+#   - `testing.strict` is normally a MAP of the five type keys. The scalar
+#     `true|false` form remains enumerated only for backward compatibility; the
+#     five leaves are what current skills read.
 #
 #   validate_local_scope [<file>]
 #     The location check the value checks above cannot do: names keys in
@@ -473,14 +514,17 @@ workflow_overrides.art_bible_strict::true|false"
 #     Warns, never reconciles. Defined below is_locally_overridable.
 
 # Whitelist of locally-overridable settings (per effects-map.md
-# "Whitelist — which settings can be locally overridden"). Personal-experience
-# settings only — divergence between developers is safe because they don't
-# affect what artifacts exist on disk.
+# "Whitelist — which settings can be locally overridden"). It includes local
+# workflow and enforcement tradeoffs that must never be imposed on teammates by
+# committed configuration. Repository identity and schema settings stay out.
 _yaml_helper_locally_overridable="\
 modes.review_mode
+modes.rigor
+modes.workflow
 modes.automation
 modes.automation_always_ask
 team.size
+qa.level
 testing.strict.logic
 testing.strict.integration
 testing.strict.visual
@@ -519,12 +563,9 @@ EOF
 #   unguarded, and hand-editing is what the file is for.
 #
 #   WARNS, NEVER RECONCILES — the same shape as the stage-mirror check.
-#   It does not edit project.local.yaml, does not begin honouring
-#   the key, and does not alter resolution. A locked setting is locked
-#   because it changes which artifacts exist on disk, so a helper that
-#   "helpfully" applied one would let two developers' checkouts diverge —
-#   precisely what the whitelist exists to prevent. The fix belongs to the
-#   user: move the key to project.yaml, or delete it.
+#   It does not edit project.local.yaml, begin honouring the key, or alter
+#   resolution. The fix belongs to the user: move a team setting to
+#   project.yaml, or delete the unsupported local key.
 #
 #   The parser below is a third copy of the one in get_yaml_key and
 #   validate_yaml_enum. That duplication is deliberate and matches the
@@ -532,7 +573,12 @@ EOF
 #   and must agree on YAML edge cases exactly, and a shared copy that drifted
 #   would make two functions disagree about what a file says.
 validate_local_scope() {
-  local file="${1:-project.local.yaml}"
+  _yaml_helper_set_root
+  local file="${1:-$_YH_ROOT/project.local.yaml}"
+  case "$file" in
+    /*) : ;;
+    *) file="$_YH_ROOT/$file" ;;
+  esac
   [ -f "$file" ] || return 0
   if ! _yaml_helper_resolve_python; then return 0; fi
   local found key rc=0
@@ -567,11 +613,11 @@ def parse(lines):
         if not stack:
             return root
         parent = stack[-1][1]
-        m = re.match(r'([^:#\s][^:]*?)\s*:\s*(.*)$', stripped)
-        if not m:
+        if not stripped or stripped[0] in ' \t#:' or ':' not in stripped:
             continue
-        key = m.group(1).strip()
-        value = m.group(2).strip()
+        key, _, value = stripped.partition(':')
+        key = key.strip()
+        value = value.strip()
         if value.startswith('#'):
             value = ''
         elif value[:1] in ('"', "'"):
@@ -591,8 +637,27 @@ def parse(lines):
     return root
 
 try:
-    with open(path_file, 'r', encoding='utf-8-sig', errors='replace') as f:
-        data = parse(f.readlines())
+    import os, stat
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(path_file, flags)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            sys.stderr.write("yaml-helper: config is not a regular file\n")
+            sys.exit(1)
+        if info.st_size > 256 * 1024:
+            sys.stderr.write("yaml-helper: config exceeds the 256 KiB safety limit\n")
+            sys.exit(1)
+        with os.fdopen(descriptor, 'r', encoding='utf-8-sig', errors='replace') as f:
+            descriptor = -1
+            raw_lines = f.readlines()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if any(len(line) > 4096 for line in raw_lines):
+        sys.stderr.write("yaml-helper: config contains a line over the 4 KiB safety limit\n")
+        sys.exit(1)
+    data = parse(raw_lines)
 except OSError:
     sys.exit(0)
 
@@ -645,6 +710,7 @@ EOF
 session_state_enabled() {
   local f v
   for f in project.local.yaml project.yaml; do
+    f="$_YH_ROOT/$f"
     [ -f "$f" ] || continue
     v=$(awk '
       /^features:[[:space:]]*$/ { inf=1; next }
@@ -713,11 +779,11 @@ def parse(lines):
         if not stack:
             return root
         parent = stack[-1][1]
-        m = re.match(r'([^:#\s][^:]*?)\s*:\s*(.*)$', stripped)
-        if not m:
+        if not stripped or stripped[0] in ' \t#:' or ':' not in stripped:
             continue
-        key = m.group(1).strip()
-        value = m.group(2).strip()
+        key, _, value = stripped.partition(':')
+        key = key.strip()
+        value = value.strip()
         if value.startswith('#'):
             value = ''
         elif value[:1] in ('"', "'"):
@@ -740,10 +806,28 @@ def parse(lines):
     return root
 
 try:
-    with open(path_file, 'r', encoding='utf-8-sig', errors='replace') as f:
-        raw_lines = f.readlines()
+    import os, stat
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(path_file, flags)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            sys.stderr.write("yaml-helper: config is not a regular file\n")
+            sys.exit(1)
+        if info.st_size > 256 * 1024:
+            sys.stderr.write("yaml-helper: config exceeds the 256 KiB safety limit\n")
+            sys.exit(1)
+        with os.fdopen(descriptor, 'r', encoding='utf-8-sig', errors='replace') as f:
+            descriptor = -1
+            raw_lines = f.readlines()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 except OSError:
     sys.exit(0)
+if any(len(line) > 4096 for line in raw_lines):
+    sys.stderr.write("yaml-helper: config contains a line over the 4 KiB safety limit\n")
+    sys.exit(1)
 
 data = parse(raw_lines)
 
@@ -976,28 +1060,12 @@ EOF
 # are personal-experience knobs, not on-disk artifacts): that source sits ABOVE
 # the expansion, so only the terminal fallback moved.
 #
-# --- WHY modes.rigor DEFAULTS TO `minimal` -----------------------------------
-#
-# It defaulted to `standard`. Building the same project both ways showed the
-# heavier tier costing several times as much to reach working code without
-# producing a better result, and giving nothing back when a fresh developer
-# picked the project up. A default that costs more and does not repay is the
-# wrong default, and it was what every user who never opened /settings received.
-#
-# Raising rigor stays one question in /start and one `/settings` call, and
-# settings-guidance.md's upward triggers ("system-GDD count crosses ~9",
-# "gate-check PASS into Production while rigor is minimal") are written to fire
-# from exactly this starting state. The cost of under-running is one prompt.
-#
-# ORDER MATTERS: this default is only safe while /gate-check keeps its floors.
-# `rigor: minimal` expands to `workflow: minimal` + `qa.level: minimal`, which
-# together once left the Production->Polish gate with ZERO required artifacts --
-# a vacuous PASS. That is fixed (the smoke-report floor and the "nothing
-# required -> NOT ASSESSED, never PASS" rule). Do not move this default again
-# without re-checking that the gates below it still require something.
+# Security-focused default. A committed project may tighten this baseline.
+# Developers who deliberately need a lighter local workflow put the override in
+# gitignored project.local.yaml so it cannot silently weaken teammates' runs.
 _yaml_helper_defaults="\
 modes.automation::collaborative
-modes.rigor::minimal
+modes.rigor::standard
 performance.enforce::warn"
 
 # Rigor expansion — one asked-at-/start knob that supplies four.
@@ -1028,6 +1096,7 @@ _yaml_helper_rigor_value() {
   # Resolve rigor WITHOUT resolve_setting, to keep the recursion impossible.
   [ -f "$_YH_ROOT/project.yaml" ] && level=$(get_yaml_key "$_YH_ROOT/project.yaml" modes.rigor)
   if [ -n "$level" ] && ! validate_enum_value modes.rigor "$level" 2>/dev/null; then level=""; fi
+  if [ -n "$level" ] && ! _yaml_helper_committed_value_allowed modes.rigor "$level"; then level=""; fi
   [ -z "$level" ] && level=$(get_yaml_default modes.rigor)
   [ -z "$level" ] && return 0
 
@@ -1051,6 +1120,7 @@ _yaml_helper_rigor_level() {
   local level=""
   [ -f "$_YH_ROOT/project.yaml" ] && level=$(get_yaml_key "$_YH_ROOT/project.yaml" modes.rigor)
   if [ -n "$level" ] && ! validate_enum_value modes.rigor "$level" 2>/dev/null; then level=""; fi
+  if [ -n "$level" ] && ! _yaml_helper_committed_value_allowed modes.rigor "$level"; then level=""; fi
   [ -z "$level" ] && level=$(get_yaml_default modes.rigor)
   printf '%s' "$level"
 }
@@ -1111,6 +1181,61 @@ EOF
   return 0
 }
 
+# A committed project file can raise safety-sensitive settings, but cannot
+# lower them below the built-in baseline. Developers may make a local tradeoff
+# in gitignored project.local.yaml.
+_yaml_helper_committed_value_allowed() {
+  local path="$1" value="$2" rank=-1 baseline=0
+  case "$path:$value" in
+    modes.automation:autonomous) rank=0 ;;
+    modes.automation:guided) rank=1 ;;
+    modes.automation:collaborative) rank=2 ;;
+    modes.review_mode:solo|modes.rigor:minimal|modes.workflow:minimal|qa.level:minimal) rank=0 ;;
+    modes.review_mode:lean|modes.rigor:standard|modes.workflow:standard|qa.level:standard) rank=1 ;;
+    modes.review_mode:full|modes.rigor:full|modes.workflow:full|qa.level:full) rank=2 ;;
+    testing.strict:false|testing.strict.*:false) rank=0 ;;
+    testing.strict:true|testing.strict.*:true) rank=1 ;;
+    performance.enforce:off) rank=0 ;;
+    performance.enforce:warn) rank=1 ;;
+    performance.enforce:block) rank=2 ;;
+    *) return 0 ;;
+  esac
+  case "$path" in
+    modes.automation) baseline=2 ;;
+    modes.review_mode|modes.rigor|modes.workflow|qa.level) baseline=1 ;;
+    testing.strict|testing.strict.*) baseline=1 ;;
+    performance.enforce) baseline=1 ;;
+    *) baseline=0 ;;
+  esac
+  [ "$rank" -ge "$baseline" ]
+}
+
+config_security_notices() {
+  _yaml_helper_set_root
+  [ -f "$_YH_ROOT/project.yaml" ] || return 0
+  local path value
+  for path in modes.automation modes.review_mode modes.rigor modes.workflow qa.level \
+      testing.strict testing.strict.logic testing.strict.integration \
+      testing.strict.visual testing.strict.ui testing.strict.config \
+      performance.enforce; do
+    value=$(get_yaml_key "$_YH_ROOT/project.yaml" "$path" 2>/dev/null)
+    [ -n "$value" ] || continue
+    if ! _yaml_helper_committed_value_allowed "$path" "$value"; then
+      if [ "$path" = "testing.strict" ]; then
+        printf 'Ignored project.yaml %s=%s because committed configuration may only tighten the built-in default; set the individual testing.strict.* leaves in project.local.yaml for a local loosening.\n' "$path" "$value"
+      else
+        printf 'Ignored project.yaml %s=%s because committed configuration may only tighten the built-in default; use project.local.yaml for a local loosening.\n' "$path" "$value"
+      fi
+    fi
+  done
+}
+
+_yaml_helper_safe_text() {
+  local value="$1" pattern="$2"
+  [ -n "$value" ] && [ "${#value}" -le 128 ] \
+    && printf '%s\n' "$value" | LC_ALL=C grep -Eq "$pattern"
+}
+
 # Read a legacy plain-text mirror. Strips CR and surrounding whitespace but
 # PRESERVES INTERNAL SPACES — "Systems Design" is a legal project.stage value,
 # and a `tr -d '[:space:]'` reader collapsed it to "SystemsDesign", which
@@ -1120,9 +1245,10 @@ get_legacy_key() {
   [ -z "$path" ] && return 0
   file=$(_yaml_helper_legacy_file_for "$path")
   [ -z "$file" ] && return 0
-  [ -f "$file" ] || return 0
-  awk 'BEGIN{FS="\n"} { gsub(/\r/,""); sub(/^[ \t]+/,""); sub(/[ \t]+$/,"");
-        if (length($0) > 0) { print; exit } }' "$file"
+  [ -f "$_YH_ROOT/$file" ] || return 0
+  ccgs_safe_read "$file" "$_YH_ROOT" 2>/dev/null \
+    | awk 'BEGIN{FS="\n"} { gsub(/\r/,""); sub(/^[ \t]+/,""); sub(/[ \t]+$/,"");
+          if (length($0) > 0) { print; exit } }'
 }
 
 # Resolve one setting through the full chain.
@@ -1148,12 +1274,16 @@ resolve_setting() {
   if [ -z "$val" ] && [ -f "$_YH_ROOT/project.yaml" ]; then
     val=$(get_yaml_key "$_YH_ROOT/project.yaml" "$path")
     if [ -n "$val" ] && ! validate_enum_value "$path" "$val" 2>/dev/null; then val=""; fi
+    if [ -n "$val" ] && ! _yaml_helper_committed_value_allowed "$path" "$val"; then val=""; fi
     [ -n "$val" ] && src="project.yaml"
   fi
 
   if [ -z "$val" ]; then
     legacy=$(_yaml_helper_legacy_file_for "$path")
-    if [ -n "$legacy" ] && [ -f "$legacy" ]; then
+    if [ "$path" = "modes.review_mode" ] && [ -f "$_YH_ROOT/project.yaml" ]; then
+      legacy=""
+    fi
+    if [ -n "$legacy" ] && [ -f "$_YH_ROOT/$legacy" ]; then
       val=$(get_legacy_key "$path")
       if [ -n "$val" ] && ! validate_enum_value "$path" "$val" 2>/dev/null; then val=""; fi
       [ -n "$val" ] && src="$legacy"
@@ -1208,13 +1338,12 @@ resolve_code_root() {
   _yaml_helper_set_root
   local ename="" src="" root="" legacy="" found="" d n=0
 
-  # 1. The configured engine, through the normal chain.
-  if [ -f "$_YH_ROOT/project.local.yaml" ]; then
-    ename=$(get_yaml_key "$_YH_ROOT/project.local.yaml" engine.name 2>/dev/null)
-    [ -n "$ename" ] && src="project.local.yaml"
-  fi
-  if [ -z "$ename" ] && [ -f "$_YH_ROOT/project.yaml" ]; then
+  # 1. The configured engine. engine.name is team-wide and locked to the
+  #    committed file; a local override would select a different toolchain and
+  #    code root for one developer.
+  if [ -f "$_YH_ROOT/project.yaml" ]; then
     ename=$(get_yaml_key "$_YH_ROOT/project.yaml" engine.name 2>/dev/null)
+    [ -n "$ename" ] && validate_enum_value engine.name "$ename" 2>/dev/null || ename=""
     [ -n "$ename" ] && src="engine.name"
   fi
 
@@ -1224,7 +1353,8 @@ resolve_code_root() {
   #    migrated resolves rather than falling through to "unset".
   legacy="$_YH_ROOT/.claude/docs/technical-preferences.md"
   if [ -z "$ename" ] && [ -f "$legacy" ]; then
-    ename=$(grep -iE '^[[:space:]]*[-*]?[[:space:]]*\*{0,2}Engine\*{0,2}[[:space:]]*:' "$legacy" 2>/dev/null \
+    ename=$(ccgs_safe_read ".claude/docs/technical-preferences.md" "$_YH_ROOT" 2>/dev/null \
+            | grep -iE '^[[:space:]]*[-*]?[[:space:]]*\*{0,2}Engine\*{0,2}[[:space:]]*:' \
             | head -1 | sed 's/.*://' | tr -d '\r' \
             | sed 's/^[[:space:]]*//; s/[[:space:]].*$//; s/\*//g')
     case "$ename" in
@@ -1278,10 +1408,10 @@ def parse(lines):
         if not stack:
             return root
         parent = stack[-1][1]
-        m = re.match(r'([^:#\s][^:]*?)\s*:\s*(.*)$', stripped)
-        if not m:
+        if not stripped or stripped[0] in ' \t#:' or ':' not in stripped:
             continue
-        key, value = m.group(1).strip(), m.group(2).strip()
+        key, _, value = stripped.partition(':')
+        key, value = key.strip(), value.strip()
         if value.startswith('#'):
             value = ''
         elif value[:1] in ('"', "'"):
@@ -1298,8 +1428,27 @@ def parse(lines):
     return root
 
 try:
-    with open(path_file, 'r', encoding='utf-8-sig', errors='replace') as f:
-        data = parse(f.readlines())
+    import os, stat
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(path_file, flags)
+    try:
+        info = os.fstat(descriptor)
+        if not stat.S_ISREG(info.st_mode):
+            sys.stderr.write("yaml-helper: config is not a regular file\n")
+            sys.exit(0)
+        if info.st_size > 256 * 1024:
+            sys.stderr.write("yaml-helper: config exceeds the 256 KiB safety limit\n")
+            sys.exit(0)
+        with os.fdopen(descriptor, 'r', encoding='utf-8-sig', errors='replace') as f:
+            descriptor = -1
+            raw_lines = f.readlines()
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    if any(len(line) > 4096 for line in raw_lines):
+        sys.stderr.write("yaml-helper: config contains a line over the 4 KiB safety limit\n")
+        sys.exit(0)
+    data = parse(raw_lines)
 except OSError:
     sys.exit(0)
 
@@ -1359,10 +1508,10 @@ resolve_config() {
 
   # Collect enum complaints from both files so a typo is visible, not silent.
   local enum_err
-  enum_err=$(validate_yaml_enum project.yaml 2>&1 >/dev/null)
+  enum_err=$(validate_yaml_enum "$_YH_ROOT/project.yaml" 2>&1 >/dev/null)
   [ -n "$enum_err" ] && notes="${notes:+$notes; }$(echo "$enum_err" | tr '\n' ';' | sed 's/;$//') — ignored, chain continued"
   if [ -f "$_YH_ROOT/project.local.yaml" ]; then
-    enum_err=$(validate_yaml_enum project.local.yaml 2>&1 >/dev/null)
+    enum_err=$(validate_yaml_enum "$_YH_ROOT/project.local.yaml" 2>&1 >/dev/null)
     [ -n "$enum_err" ] && notes="${notes:+$notes; }local: $(echo "$enum_err" | tr '\n' ';' | sed 's/;$//')"
     # Locked keys in the local file. Separate from the enum check
     # above because their VALUES are legal — it is the location that is not, so
@@ -1372,11 +1521,17 @@ resolve_config() {
     # full remedy sentence per key for direct callers, and three copies of it
     # would cost more of this block than every resolved value put together.
     local scope_err scope_keys
-    scope_err=$(validate_local_scope project.local.yaml 2>&1 >/dev/null)
+    scope_err=$(validate_local_scope "$_YH_ROOT/project.local.yaml" 2>&1 >/dev/null)
     if [ -n "$scope_err" ]; then
       scope_keys=$(printf '%s\n' "$scope_err" | sed -n 's/.*`\([^`]*\)`.*/\1/p' | paste -sd, - | sed 's/,/, /g')
       notes="${notes:+$notes; }local: not locally overridable, ignored — $scope_keys (move to project.yaml or delete)"
     fi
+  fi
+
+  local security_notices
+  security_notices=$(config_security_notices)
+  if [ -n "$security_notices" ]; then
+    notes="${notes:+$notes; }$(printf '%s\n' "$security_notices" | tr '\n' ';' | sed 's/;$//')"
   fi
 
   # Framing costs ~81 chars. For a skill reading 1-2 knobs that is more than the
@@ -1426,6 +1581,8 @@ resolve_config() {
   if _rc_want engine; then
     ename=$(get_yaml_key "$_YH_ROOT/project.yaml" engine.name 2>/dev/null)
     eversion=$(get_yaml_key "$_YH_ROOT/project.yaml" engine.version 2>/dev/null)
+    if [ -n "$ename" ] && ! validate_enum_value engine.name "$ename" 2>/dev/null; then ename=""; fi
+    if [ -n "$eversion" ] && ! _yaml_helper_safe_text "$eversion" '^[A-Za-z0-9][A-Za-z0-9._+ ()-]{0,63}$'; then eversion=""; fi
     if [ -n "$ename" ]; then
       echo "engine: $ename${eversion:+ $eversion} (project.yaml)"
     else
@@ -1435,11 +1592,15 @@ resolve_config() {
 
   # testing.strict.*: reported as CONFIGURED STATE ONLY, never defaulted here.
   # Its unset default differs per skill by design.
-  local ts_out="" k tv
+  local ts_out="" k tv parent_strict
   if _rc_want testing.strict; then
+    parent_strict=$(get_effective_yaml_key testing.strict 2>/dev/null)
+    if [ -n "$parent_strict" ] && ! validate_enum_value testing.strict "$parent_strict" 2>/dev/null; then
+      parent_strict=""
+    fi
     for k in logic integration visual ui config; do
       tv=$(get_effective_yaml_key "testing.strict.$k" 2>/dev/null)
-      [ -z "$tv" ] && tv=$(get_yaml_key "$_YH_ROOT/project.yaml" testing.strict 2>/dev/null)
+      [ -z "$tv" ] && tv="$parent_strict"
       ts_out="$ts_out $k=${tv:-unset}"
     done
     echo "testing.strict:${ts_out} (unset = each skill applies its own default)"
@@ -1491,6 +1652,7 @@ resolve_config() {
   local ct
   if _rc_want cert_tier || _rc_want platform.cert_tier; then
     ct=$(get_effective_yaml_key platform.cert_tier 2>/dev/null)
+    if [ -n "$ct" ] && ! validate_enum_value platform.cert_tier "$ct" 2>/dev/null; then ct=""; fi
     if [ -n "$ct" ]; then
       echo "platform.cert_tier: $ct"
     else
@@ -1502,12 +1664,14 @@ resolve_config() {
   # second call. A named <system> is echoed explicitly for convenience.
   local so_keys so_out="" sk sv
   if _rc_want system_overrides; then
-    so_keys=$(get_yaml_child_keys project.yaml workflow_overrides.system_overrides 2>/dev/null)
+    so_keys=$(get_yaml_child_keys "$_YH_ROOT/project.yaml" workflow_overrides.system_overrides 2>/dev/null)
     if [ -n "$so_keys" ]; then
       while IFS= read -r sk; do
         [ -z "$sk" ] && continue
+        _yaml_helper_safe_text "$sk" '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$' || continue
         sv=$(get_yaml_key "$_YH_ROOT/project.yaml" "workflow_overrides.system_overrides.$sk" 2>/dev/null)
-        [ -n "$sv" ] && so_out="$so_out $sk=$sv"
+        [ -n "$sv" ] && validate_enum_value modes.workflow "$sv" 2>/dev/null \
+          && so_out="$so_out $sk=$sv"
       done <<EOF
 $so_keys
 EOF
@@ -1515,8 +1679,13 @@ EOF
     echo "system_overrides:${so_out:- none}"
   fi
   if [ -n "$system" ]; then
+    if ! _yaml_helper_safe_text "$system" '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$'; then
+      system=""
+    fi
+  fi
+  if [ -n "$system" ]; then
     sv=$(get_yaml_key "$_YH_ROOT/project.yaml" "workflow_overrides.system_overrides.$system" 2>/dev/null)
-    if [ -n "$sv" ]; then
+    if [ -n "$sv" ] && validate_enum_value modes.workflow "$sv" 2>/dev/null; then
       echo "workflow[$system]: $sv (system_overrides)"
     else
       v=$(resolve_setting modes.workflow); v="${v%%$(printf '\t')*}"

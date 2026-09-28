@@ -31,6 +31,10 @@ export LC_ALL=C
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO" || exit 1
+. "$REPO/.claude/hooks/path-security.sh" 2>/dev/null || {
+  echo "migration: trusted file helper is unavailable" >&2
+  exit 1
+}
 
 MODE="migrate"
 case "${1:-}" in
@@ -165,10 +169,26 @@ yaml_num() { { [ -z "$1" ] || ! is_num "$1"; } && printf 'null' || printf '%s' "
 re_quote() { printf '%s' "$1" | sed 's/[][\\.*^$(){}?+|/]/\\&/g'; }
 
 trim_line() {
-  sed -e 's/\r//g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$1" | head -1
+  ccgs_safe_read "$1" "$REPO" 2>/dev/null \
+    | sed -e 's/\r//g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+    | head -1
 }
 
 # --- preflight --------------------------------------------------------------
+
+for _write_target in "$PY" "$REPORT"; do
+  if [ -L "$_write_target" ]; then
+    echo "REFUSED: migration target is a symbolic link: $_write_target" >&2
+    exit 3
+  fi
+done
+
+for _legacy_input in "$STAGE_TXT" "$REVIEW_TXT" "$TP"; do
+  if [ -L "$_legacy_input" ]; then
+    echo "REFUSED: legacy input is a symbolic link: $_legacy_input" >&2
+    exit 3
+  fi
+done
 
 # A legacy file whose value project.yaml ALREADY carries is a MIRROR, not a
 # rival source of truth.
@@ -644,7 +664,10 @@ fi
     echo "  coverage_minimum: $TEST_COV"
     echo ""
   fi
-} > "$PY"
+} | ccgs_safe_replace "$PY" "$REPO" || {
+  echo "migration: refused unsafe or unwritable target $PY" >&2
+  exit 1
+}
 
 # --- write the report -------------------------------------------------------
 
@@ -729,7 +752,10 @@ mkdir -p production 2>/dev/null
   echo "## Manual review"
   echo ""
   if [ -n "$MANUAL" ]; then printf '%s' "$MANUAL"; else echo "None."; fi
-} > "$REPORT"
+} | ccgs_safe_replace "$REPORT" "$REPO" || {
+  echo "migration: refused unsafe or unwritable target $REPORT" >&2
+  exit 1
+}
 
 echo "wrote $PY"
 echo "wrote $REPORT"

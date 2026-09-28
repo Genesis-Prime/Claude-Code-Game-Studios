@@ -23,6 +23,8 @@ SESSION_LOG_DIR="production/session-logs"
 # Log recent git activity from this session (check up to 8 hours for long sessions)
 RECENT_COMMITS=$(git log --oneline --since="8 hours ago" 2>/dev/null)
 MODIFIED_FILES=$(git diff --name-only 2>/dev/null)
+RECENT_COMMITS=$(printf '%s' "$RECENT_COMMITS" | ccgs_sanitize_multiline 262144)
+MODIFIED_FILES=$(printf '%s' "$MODIFIED_FILES" | ccgs_sanitize_multiline 262144)
 
 # --- Archive active session state on shutdown (do NOT delete) ---
 # active.md persists across clean exits so multi-session recovery works.
@@ -52,6 +54,7 @@ if command -v ccgs_session_state_path_present >/dev/null 2>&1 \
     && ccgs_session_state_path_present "$CCGS_ROOT"; then
     if STATE_CONTENT=$(ccgs_read_session_state "$CCGS_ROOT"); then
         STATE_HASH=$(printf '%s\n' "$STATE_CONTENT" | git hash-object --stdin 2>/dev/null)
+        STATE_CONTENT=$(printf '%s' "$STATE_CONTENT" | ccgs_sanitize_multiline 1048576)
         PREVIOUS_STATE_HASH=$(ccgs_safe_read "$STATE_HASH_FILE" 2>/dev/null || true)
         if [ -z "$STATE_HASH" ] || [ "$STATE_HASH" != "$PREVIOUS_STATE_HASH" ]; then
             if {
@@ -126,6 +129,8 @@ if [ ! -t 0 ]; then
     else
         SESSION_ID=$(echo "$INPUT" | grep -oE '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/"session_id"[[:space:]]*:[[:space:]]*"//;s/"$//')
     fi
+    SESSION_ID=$(printf '%s' "$SESSION_ID" | ccgs_sanitize_text 100)
+    case "$SESSION_ID" in ''|*[!A-Za-z0-9._:-]*) SESSION_ID="" ;; esac
 
     # No session id means no honest per-session number. Report nothing rather
     # than a total that silently spans every session in the log.
@@ -151,6 +156,8 @@ if [ ! -t 0 ]; then
                 echo "|-------|--------|"
                 printf '%s\n' "$BREAKDOWN" | while read -r count name; do
                     [ -z "$name" ] && continue
+                    name=$(printf '%s' "$name" | ccgs_sanitize_text 100)
+                    case "$name" in *[!A-Za-z0-9._:-]*) name="unknown" ;; esac
                     echo "| $name | $count |"
                 done
                 echo ""

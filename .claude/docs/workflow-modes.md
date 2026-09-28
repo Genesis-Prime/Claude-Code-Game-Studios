@@ -37,10 +37,11 @@ required-artifact set for that tier.
 Resolve the workflow tier (store the result; see scope note below):
 1. If the resolution is for a named system AND
    `workflow_overrides.system_overrides.<system>` is set → use that tier
-2. Else read `modes.workflow` from `project.yaml` → use that value
-3. Else → use the tier implied by `modes.rigor`
+2. Else resolve `modes.workflow` through `project.local.yaml`, the allowed
+   committed value, and then the `modes.rigor` expansion
+3. If no value is configured → use the tier implied by default rigor
    (`minimal`→`minimal`, `standard`→`standard`, `full`→`full`;
-    `rigor` itself defaults to `minimal`)
+    `rigor` itself defaults to `standard`)
 ```
 
 `modes.workflow` has **no terminal default** — step 3 is the `rigor` expansion,
@@ -113,9 +114,9 @@ says so.
 `rigor` expansion. Do **not** use `get_effective_yaml_key modes.workflow`: it
 reads the two YAML files only, so on a project that sets `modes.rigor` and not
 `modes.workflow` it returns **empty** while the effective tier is whatever rigor
-implies. (`project.local.yaml` is not allowed to override workflow — it is locked
-to `project.yaml` per the whitelist — so the only sources are `project.yaml` and
-the expansion.) Per-system overrides read via
+implies. Local workflow and rigor overrides are allowed for an intentional
+developer-specific lightweight run; committed values cannot loosen the standard
+safety floor. Per-system overrides read via
 `get_yaml_key project.yaml workflow_overrides.system_overrides.<system>`.
 
 ---
@@ -126,13 +127,11 @@ the expansion.) Per-system overrides read via
 |------|----------------|---------------------|----------|
 | `full` | High | All 8 GDD sections per system, full architecture, all ADRs, art bible, UX specs per screen | Teams, commercial titles, learning the full pipeline |
 | `standard` | Balanced | 5 GDD sections per system, one architecture doc, critical ADRs, game concept, systems index | Projects that outgrew a brief - several interacting systems, or a design someone else implements |
-| `minimal` | Low | One-page `design/game-brief.md` + engine choice (its build-order field is the plan — no separate sprint plan) | **Default.** Jam projects, small scope, design already in your head |
+| `minimal` | Low | One-page `design/game-brief.md` + engine choice (its build-order field is the plan — no separate sprint plan) | Jam projects, small scope, design already in your head |
 
-**Default**: `minimal` (the rationale block above `_yaml_helper_defaults` in
-`.claude/hooks/yaml-helper.sh` carries the reasoning and the ordering
-constraint). **Set by**: `/start`, `/settings`. **Locked to
-`project.yaml`** (not locally overridable — divergence would change which
-artifacts must exist on disk).
+**Default**: `standard`. **Set by**: `/start`, `/settings`. A committed value may
+only equal or tighten the standard floor; use `project.local.yaml` for an
+intentional local `minimal` workflow.
 
 > **Permissive, not restrictive.** `workflow` controls what is REQUIRED, not
 > what is ALLOWED. Any skill can run at any tier. The setting changes what

@@ -23,7 +23,7 @@ per-turn context (the same reason `context-management.md` was demoted).
 ## 1. The knob that matters most: `modes.rigor`
 
 Almost every "what settings should I use?" question reduces to one choice:
-`modes.rigor` (`minimal` | `standard` | `full`, default `minimal`). It fronts six
+`modes.rigor` (`minimal` | `standard` | `full`, default `standard`). It fronts six
 sub-knobs — `modes.workflow`, `docs.density`, `qa.level`, `modes.story_granularity`,
 `modes.review_mode`, `team.size`. Recommend **rigor**, not the six; let the
 expansion do the rest. Full expansion table lives in `effects-map.md § modes.rigor`
@@ -68,7 +68,8 @@ an archetype and **pre-select** the recommendation rather than asking cold. Sign
 **Rules:** these are heuristics, never locks. Always confirm the pre-selection with
 the user in their own terms ("Sounds like a big systems game — I'd suggest `full`
 rigor; want that?"). If the user has **no concept yet** (exploring), do not seed
-`full` — default `minimal`, and revisit once a concept exists.
+`full` — recommend `minimal` for that exploratory session, and revisit once a
+concept exists.
 
 "No concept yet" means **no signal**, not a particular onboarding path. A rough
 one-line hint is still a description: if it trips the signals above, seed from the

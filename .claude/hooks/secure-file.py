@@ -128,6 +128,16 @@ def _check_open_file(descriptor):
     return info
 
 
+def _clear_nonblock(descriptor):
+    try:
+        import fcntl
+        flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+        if flags & os.O_NONBLOCK:
+            fcntl.fcntl(descriptor, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
+    except (AttributeError, ImportError, OSError):
+        pass
+
+
 def _acquire_write_lock(parent_descriptor):
     import fcntl
     fcntl.flock(parent_descriptor, fcntl.LOCK_EX)
@@ -153,12 +163,14 @@ def _descriptor_operation(operation, root, parts):
     binary = getattr(os, "O_BINARY", 0)
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     cloexec = getattr(os, "O_CLOEXEC", 0)
+    nonblock = getattr(os, "O_NONBLOCK", 0)
     lock = None
     try:
         if operation == "read":
-            descriptor = os.open(name, os.O_RDONLY | binary | nofollow | cloexec, dir_fd=parent)
+            descriptor = os.open(name, os.O_RDONLY | binary | nofollow | cloexec | nonblock, dir_fd=parent)
             try:
                 info = _check_open_file(descriptor)
+                _clear_nonblock(descriptor)
                 if info.st_size > MAX_READ_BYTES:
                     raise SecureFileError("file exceeds the 16 MiB safety limit")
                 chunks = []
@@ -180,12 +192,13 @@ def _descriptor_operation(operation, root, parts):
         if operation == "append":
             existing = b""
             try:
-                descriptor = os.open(name, os.O_RDONLY | binary | nofollow | cloexec, dir_fd=parent)
+                descriptor = os.open(name, os.O_RDONLY | binary | nofollow | cloexec | nonblock, dir_fd=parent)
             except FileNotFoundError:
                 descriptor = None
             if descriptor is not None:
                 try:
                     info = _check_open_file(descriptor)
+                    _clear_nonblock(descriptor)
                     if info.st_size > MAX_READ_BYTES:
                         raise SecureFileError("file exceeds the 16 MiB safety limit")
                     chunks = []

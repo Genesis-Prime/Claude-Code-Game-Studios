@@ -21,11 +21,17 @@ if [ -z "$_VC_PY" ]; then
     exit 2
 fi
 
-printf '%s' "$INPUT" | "$_VC_PY" -I "$_CCGS_HOOK_DIR/git-command-security.py" commit "$CCGS_ROOT"
+_CLASS_OUTPUT=$(printf '%s' "$INPUT" | "$_VC_PY" -I "$_CCGS_HOOK_DIR/git-command-security.py" commit "$CCGS_ROOT")
 _CLASS_RC=$?
+_ASK_AFTER_VALIDATE=0
 case "$_CLASS_RC" in
     0) ;;
     1) exit 0 ;;
+    3)
+        printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"creates commits without staged-file validation"}}'
+        exit 0
+        ;;
+    4) _ASK_AFTER_VALIDATE=1 ;;
     *) echo "BLOCKED: possible Git commit could not be validated safely" >&2; exit 2 ;;
 esac
 
@@ -39,4 +45,9 @@ _CR=$(resolve_code_root 2>/dev/null)
 CODE_ROOT=$(printf '%s' "$_CR" | cut -f1)
 
 "$_VC_PY" -I "$_CCGS_HOOK_DIR/validate-staged.py" "$CCGS_ROOT" "$WORKFLOW" "$CODE_ROOT"
-exit $?
+_VALIDATE_RC=$?
+[ "$_VALIDATE_RC" -eq 0 ] || exit "$_VALIDATE_RC"
+if [ "$_ASK_AFTER_VALIDATE" = "1" ]; then
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"creates commits without staged-file validation"}}'
+fi
+exit 0

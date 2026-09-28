@@ -25,6 +25,11 @@ else
   event_cwd=$(echo "$input" | grep -oE '"current_dir"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*: *"//;s/"//')
   [ -z "$model" ] && model="Unknown"
 fi
+model=$(printf '%s' "${model:-Unknown}" | ccgs_sanitize_text 80)
+case "${used_pct:-}" in
+  ''|*[!0-9]*) used_pct="" ;;
+  *) [ "$used_pct" -le 100 ] 2>/dev/null || used_pct="" ;;
+esac
 
 # Event cwd is presentation data only. It never selects code, configuration,
 # or state. All reads below stay under the authenticated script root.
@@ -49,11 +54,14 @@ if [ -f "$project_yaml" ] && [ -f "$yaml_helper" ]; then
 fi
 # Priority 2: legacy stage.txt fallback
 if [ -z "$stage" ]; then
-  stage_file="$cwd/production/stage.txt"
-  if [ -f "$stage_file" ]; then
-    stage=$(head -1 "$stage_file" | tr -d '\r\n')
-  fi
+  stage=$(ccgs_safe_read "production/stage.txt" "$cwd" 2>/dev/null \
+      | sed -n '1p' | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
 fi
+if [ -n "$stage" ] && command -v validate_enum_value >/dev/null 2>&1 \
+    && ! validate_enum_value project.stage "$stage" 2>/dev/null; then
+  stage=""
+fi
+stage=$(printf '%s' "$stage" | ccgs_sanitize_text 40)
 
 # Priority 3: Auto-detect from artifacts
 if [ -z "$stage" ]; then
@@ -115,45 +123,17 @@ if [ -z "$stage" ]; then
     stage="Concept"
   fi
 fi
-
 # --- Process posture (modes.rigor) ---
-# Locked to project.yaml (not locally overridable) with a plain terminal default
-# of 'standard', so a direct get_yaml_key read + default is exact. Deliberately
-# NOT resolve_setting: that assumes PWD is the project root, unsafe here since the
-# status line works from an absolute $cwd and never cd's.
-#
-# The 'standard' default applies ONLY when nothing contradicts it. If `rigor` is
-# unset but a knob it fronts is set explicitly, the project's real process weight
-# is whatever that knob says, and printing 'standard' actively misreports it —
-# migration is the common case, writing `modes.review_mode` and no `modes.rigor`,
-# so every v1.0 upgrader running full director reviews read 'Production · standard'.
-# Suppress instead of guessing, matching the unconfigured-project behaviour: no
-# config, no claim. Suppression is correct rather than lossy — the fronted knobs
-# disagree with each other in this state, so there is no single honest posture.
+# Use the same root-anchored resolution policy as skills and SessionStart.
 rigor=""
 if [ -f "$project_yaml" ] && [ -f "$yaml_helper" ]; then
   source "$yaml_helper"
-  rigor=$(get_yaml_key "$project_yaml" modes.rigor 2>/dev/null)
-  if [ -z "$rigor" ]; then
-    rigor="standard"
-    # Cheap pre-filter first. This hook runs every turn, and the common case
-    # (nothing fronted set) must not cost a get_yaml_key subprocess per key.
-    # The grep is a deliberate SUPERSET — it matches the leaf names anywhere at
-    # depth, so a false positive only costs the precise checks below, while a
-    # miss is impossible. Never let it decide on its own: a bare `size:` under
-    # some unrelated block would suppress the posture with no reason.
-    _fronted='^[[:space:]]+(review_mode|workflow|density|level|story_granularity|size):[[:space:]]*[^[:space:]#]'
-    for _f in "$project_yaml" "$cwd/project.local.yaml"; do
-      [ -f "$_f" ] || continue
-      grep -qE "$_fronted" "$_f" 2>/dev/null || continue
-      for _k in modes.review_mode modes.workflow docs.density qa.level \
-                modes.story_granularity team.size; do
-        if [ -n "$(get_yaml_key "$_f" "$_k" 2>/dev/null)" ]; then rigor=""; break; fi
-      done
-      [ -z "$rigor" ] && break
-    done
-  fi
+  rigor=$(resolve_setting modes.rigor 2>/dev/null | cut -f1)
 fi
+if [ -n "$rigor" ] && ! validate_enum_value modes.rigor "$rigor" 2>/dev/null; then
+  rigor=""
+fi
+rigor=$(printf '%s' "$rigor" | ccgs_sanitize_text 20)
 
 # --- Epic/Feature/Task breadcrumb (Production+ only) ---
 breadcrumb=""
@@ -171,9 +151,9 @@ if [ "$stage" = "Production" ] || [ "$stage" = "Polish" ] || [ "$stage" = "Relea
       esac
       if [ "$in_block" = true ]; then
         case "$line" in
-          Epic:*) epic=$(echo "$line" | sed 's/^Epic: *//') ;;
-          Feature:*) feature=$(echo "$line" | sed 's/^Feature: *//') ;;
-          Task:*) task=$(echo "$line" | sed 's/^Task: *//') ;;
+          Epic:*) epic=$(echo "$line" | sed 's/^Epic: *//' | ccgs_sanitize_text 80) ;;
+          Feature:*) feature=$(echo "$line" | sed 's/^Feature: *//' | ccgs_sanitize_text 80) ;;
+          Task:*) task=$(echo "$line" | sed 's/^Task: *//' | ccgs_sanitize_text 80) ;;
         esac
       fi
     done < <(printf '%s\n' "$state_content")

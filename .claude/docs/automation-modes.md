@@ -134,9 +134,14 @@ reported.
 
 ### Recognized categories
 
-The first three categories always interrupt an `autonomous` run. The remaining
+The first four categories always interrupt an `autonomous` run. The remaining
 recognized categories do so when configured. Read the resolved list with
 `resolve_config` rather than inferring it from this table.
+
+Claude Code `permissions.ask` rules remain active in every mode and override
+skill `allowed-tools` grants and local allow rules. They gate framework edits,
+network commands, inline interpreter code, and typed project-command runs even
+when the automation mode is `autonomous`.
 
 | Category | Examples of decisions in this category |
 |----------|----------------------------------------|

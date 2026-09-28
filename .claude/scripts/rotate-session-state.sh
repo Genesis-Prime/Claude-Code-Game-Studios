@@ -25,6 +25,11 @@
 
 set -u
 cd "$(dirname "$0")/../.." || exit 1
+REPO="$PWD"
+. "$REPO/.claude/hooks/path-security.sh" 2>/dev/null || {
+  echo "rotate-session-state: trusted file helper is unavailable" >&2
+  exit 1
+}
 
 STATE="production/session-state/active.md"
 LOGDIR="production/session-logs"
@@ -43,8 +48,12 @@ if [ ! -f "$STATE" ]; then
   echo "no session state at $STATE — nothing to rotate"
   exit 0
 fi
+if ! STATE_CONTENT=$(ccgs_safe_read "$STATE" "$REPO" 2>/dev/null); then
+  echo "REFUSED: $STATE is linked, redirected, non-regular, or unreadable." >&2
+  exit 3
+fi
 
-if ! grep -q '<!-- /CHECKPOINT -->' "$STATE"; then
+if ! printf '%s\n' "$STATE_CONTENT" | grep -q '<!-- /CHECKPOINT -->'; then
   echo "REFUSED: $STATE has no <!-- /CHECKPOINT --> marker."
   echo "  Rotation splits the file at that marker, so without it this script"
   echo "  cannot tell the checkpoint from the narrative and would move both."
@@ -53,8 +62,8 @@ if ! grep -q '<!-- /CHECKPOINT -->' "$STATE"; then
 fi
 
 # Everything through the marker is the checkpoint; everything after is narrative.
-SPLIT=$(grep -n '<!-- /CHECKPOINT -->' "$STATE" | head -1 | cut -d: -f1)
-TOTAL=$(wc -l < "$STATE" | tr -d ' ')
+SPLIT=$(printf '%s\n' "$STATE_CONTENT" | grep -n '<!-- /CHECKPOINT -->' | head -1 | cut -d: -f1)
+TOTAL=$(printf '%s\n' "$STATE_CONTENT" | awk 'END { print NR }')
 NARRATIVE=$((TOTAL - SPLIT))
 
 if [ "$NARRATIVE" -le 5 ]; then
@@ -75,35 +84,20 @@ if [ "$DRY" = "1" ]; then
   exit 0
 fi
 
-mkdir -p "$LOGDIR" 2>/dev/null
-
-{
+if ! {
   echo ""
   echo "---"
   echo ""
   echo "## Rotated from active.md on $STAMP ($NARRATIVE lines)"
   echo ""
-  tail -n "+$((SPLIT + 1))" "$STATE"
-} >> "$ARCHIVE"
-
-# Write the truncated state beside the file it replaces, not in a system temp
-# dir. `${TMPDIR:-/tmp}` assumes /tmp exists and is writable; where it is not,
-# the redirect failed, `&&` skipped the mv, and the script then printed
-# "rotated N lines" and a line count it had not produced -- reporting a
-# rotation that did not happen, while the narrative it had ALREADY appended to
-# the archive stayed in active.md and got archived again on the next run.
-# mktemp in the state directory needs no external writable location and keeps
-# the mv on one filesystem, so it stays atomic.
-TMP=$(mktemp "$(dirname "$STATE")/.ccgs-rotate-XXXXXX" 2>/dev/null) || TMP=""
-if [ -z "$TMP" ]; then
-  echo "rotate-session-state: FAILED — cannot create a temporary file in $(dirname "$STATE")" >&2
-  echo "  $STATE is UNCHANGED. The narrative was appended to $ARCHIVE and is still" >&2
-  echo "  in $STATE; remove one copy before rotating again." >&2
+  printf '%s\n' "$STATE_CONTENT" | tail -n "+$((SPLIT + 1))"
+} | ccgs_safe_append "$ARCHIVE" "$REPO"; then
+  echo "rotate-session-state: REFUSED — archive target is linked, redirected, or unsafe: $ARCHIVE" >&2
   exit 1
 fi
 
 if ! {
-  head -n "$SPLIT" "$STATE"
+  printf '%s\n' "$STATE_CONTENT" | head -n "$SPLIT"
   echo ""
   echo "---"
   echo ""
@@ -111,18 +105,11 @@ if ! {
   echo ""
   echo "_Narrative through $STAMP rotated to \`$ARCHIVE\`._"
   echo ""
-} > "$TMP"; then
-  rm -f "$TMP"
-  echo "rotate-session-state: FAILED — could not write $TMP" >&2
+} | ccgs_safe_replace "$STATE" "$REPO"; then
+  echo "rotate-session-state: FAILED — could not safely replace $STATE" >&2
   echo "  $STATE is UNCHANGED (the narrative is now in BOTH $ARCHIVE and $STATE)." >&2
   exit 1
 fi
 
-if ! mv "$TMP" "$STATE"; then
-  rm -f "$TMP"
-  echo "rotate-session-state: FAILED — could not replace $STATE" >&2
-  exit 1
-fi
-
 echo "rotated $NARRATIVE lines -> $ARCHIVE"
-echo "$STATE is now $(wc -l < "$STATE" | tr -d ' ') lines"
+echo "$STATE is now $(ccgs_safe_read "$STATE" "$REPO" 2>/dev/null | awk 'END { print NR }') lines"
