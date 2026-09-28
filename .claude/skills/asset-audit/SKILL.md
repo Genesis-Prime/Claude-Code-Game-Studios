@@ -3,7 +3,7 @@ name: asset-audit
 description: "Audit assets against naming conventions, file size budgets, format standards. Finds orphaned assets, missing references."
 argument-hint: "[category|all]"
 user-invocable: true
-allowed-tools: Read, Glob, Grep, Bash
+allowed-tools: Read, Glob, Grep
 model: sonnet
 # Read-only diagnostic skill — no specialist agent delegation needed
 ---

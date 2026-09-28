@@ -5,10 +5,11 @@ paths:
 
 # Agent Memory Rules
 
-**Agent memory is the one place an agent may write without asking — and the only
-one.** `.claude/agent-memory/` is gitignored, per-agent, and never ships. That
-exemption exists because the memory is the agent's own working notes about how to
-do its job, not a project artifact.
+**Project agent memory is the one place an agent may write without asking — and
+the only one.** `.claude/agent-memory/` is gitignored and scoped to this project
+and agent. Director memories use `memory: project`; do not use cross-project
+`memory: user` for CCGS agents. The exemption exists because the memory is the
+agent's own working notes about how to do its job, not a project artifact.
 
 It does **not** extend anywhere else. The Collaboration Protocol still governs
 every file under `src/`, `design/`, `docs/`, `production/` and `assets/`: ask

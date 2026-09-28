@@ -4,7 +4,7 @@ description: "Highest creative authority — vision, tone, aesthetic direction. 
 tools: Read, Glob, Grep, Write, Edit, WebSearch
 model: opus
 maxTurns: 30
-memory: user
+memory: project
 disallowedTools: Bash
 skills: [brainstorm, design-review]
 ---
