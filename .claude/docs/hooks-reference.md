@@ -37,7 +37,7 @@ same authenticated file boundary, validate the resulting enum, and drop linked,
 redirected, or invalid values. Terminal and audit strings pass through the
 shared control-character sanitizer before output.
 
-Automatic append, replace, read, and directory-creation operations use
+Automatic append, replace, read, delete, and directory-creation operations use
 handle-relative traversal and parent-directory locks. Python does not expose
 that primitive on native Windows, so `secure-file.py` refuses those operations
 there and the calling hook emits a diagnostic instead of falling back to a

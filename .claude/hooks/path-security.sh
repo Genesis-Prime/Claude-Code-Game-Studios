@@ -72,6 +72,7 @@ ccgs_safe_append() { ccgs_secure_file append "$1" "${2:-${CCGS_ROOT:-$_ccgs_path
 ccgs_safe_replace() { ccgs_secure_file replace "$1" "${2:-${CCGS_ROOT:-$_ccgs_path_security_root}}"; }
 ccgs_safe_read() { ccgs_secure_file read "$1" "${2:-${CCGS_ROOT:-$_ccgs_path_security_root}}"; }
 ccgs_safe_mkdir() { ccgs_secure_file mkdir "$1" "${2:-${CCGS_ROOT:-$_ccgs_path_security_root}}"; }
+ccgs_safe_delete() { ccgs_secure_file delete "$1" "${2:-${CCGS_ROOT:-$_ccgs_path_security_root}}"; }
 
 # Sanitize one untrusted value before it reaches a terminal or one-line log.
 # ESC, C0, C1 and DEL controls are removed and output is capped by UTF-8 bytes.

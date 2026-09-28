@@ -27,8 +27,9 @@ engine has a native way.
    `python -I .claude/scripts/run-project-command.py inspect run`, present the
    exact argv and SHA for `command_execution` approval, then pass that SHA to
    the dispatcher's `run` action. Never evaluate the YAML as shell source.
-   The runner rejects shells and interpreters used with inline-code flags and
-   resolves bare executables only through absolute `PATH` entries. The SHA
+   The runner rejects `env` wrappers plus shells and interpreters used with
+   inline-code flags, and resolves bare executables only through absolute
+   `PATH` entries. The SHA
    proves the reviewed argv is unchanged; the project `permissions.ask` rule is
    the human approval gate for every `run` action. Legacy scalar commands are
    untrusted. Never use the headless / batch /

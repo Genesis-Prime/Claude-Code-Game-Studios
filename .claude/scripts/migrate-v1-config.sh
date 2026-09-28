@@ -299,7 +299,13 @@ if [ "$MODE" = "finalize" ]; then
     exit 4
   fi
   for f in "$STAGE_TXT" "$REVIEW_TXT"; do
-    [ -f "$f" ] && rm -f "$f" && echo "deleted $f"
+    if [ -e "$f" ] || [ -L "$f" ]; then
+      if ! ccgs_safe_delete "$f" "$REPO"; then
+        echo "REFUSED: legacy target is linked, redirected, or unsafe: $f" >&2
+        exit 3
+      fi
+      echo "deleted $f"
+    fi
   done
   echo "NOTE: $TP is NOT deleted — it still holds Forbidden Patterns and"
   echo "      Allowed Libraries, which have no project.yaml equivalent."
@@ -469,13 +475,10 @@ if [ -f "$TP" ]; then
 fi
 [ -f "$TP" ] && manual "Forbidden Patterns and Allowed Libraries stay in $TP — they have no project.yaml equivalent"
 
-# v1.0 had no `modes.rigor`; its fixed process level matches v1.1's `standard`.
-# v1.1 defaults `rigor` to `minimal`, and this script writes nothing it did not
-# read, so a migrated project lands on `minimal` — fewer required GDD sections,
-# terser docs, lighter test evidence, no director panels. That is a behaviour
-# change the upgrader never chose; say so in the one artifact they read first.
-warn "modes.rigor is not written — v1.1 defaults it to \`minimal\`, which is lighter than v1.0 behaved (v1.0 matched \`standard\`). To keep v1.0's process level, add \`modes: { rigor: standard }\` to project.yaml or run \`/settings modes.rigor=standard\`"
-manual "Decide \`modes.rigor\`: leave unset for the lighter v1.1 default, or pin \`standard\` to keep v1.0's process level"
+# v1.0 had no `modes.rigor`; its fixed process level matches the current
+# security-focused `standard` default. Leaving rigor unset preserves that
+# behavior. A developer who wants a lightweight local run sets `minimal` in
+# project.local.yaml after migration.
 
 # Report the STRING keys that land in the file as `null`, which the numeric
 # family above already does and this half never did.

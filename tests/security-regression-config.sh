@@ -65,8 +65,6 @@ cat > "$project/project.local.yaml" <<'YAML'
 modes:
   automation: autonomous
   rigor: minimal
-qa:
-  level: minimal
 testing:
   strict:
     logic: false
@@ -76,14 +74,19 @@ YAML
 local_values=$(
   cd "$project" || exit 1
   . .claude/hooks/yaml-helper.sh
-  for key in modes.automation modes.rigor qa.level testing.strict.logic performance.enforce; do
+  for key in modes.automation modes.rigor modes.workflow modes.review_mode docs.density modes.story_granularity qa.level team.size testing.strict.logic performance.enforce; do
     value=$(resolve_setting "$key")
     printf '%s=%s\n' "$key" "${value%%$(printf '\t')*}"
   done
 ) || fail "local policy resolution failed"
 assert_contains "$local_values" "modes.automation=autonomous" "local automation override was ignored"
 assert_contains "$local_values" "modes.rigor=minimal" "local rigor override was ignored"
-assert_contains "$local_values" "qa.level=minimal" "local QA override was ignored"
+assert_contains "$local_values" "modes.workflow=minimal" "local rigor did not derive minimal workflow"
+assert_contains "$local_values" "modes.review_mode=solo" "local rigor did not derive solo review"
+assert_contains "$local_values" "docs.density=terse" "local rigor did not derive terse docs"
+assert_contains "$local_values" "modes.story_granularity=coarse" "local rigor did not derive coarse stories"
+assert_contains "$local_values" "qa.level=minimal" "local rigor did not derive minimal QA"
+assert_contains "$local_values" "team.size=individual" "local rigor did not derive individual team size"
 assert_contains "$local_values" "testing.strict.logic=false" "local strictness override was ignored"
 assert_contains "$local_values" "performance.enforce=off" "local performance override was ignored"
 
@@ -150,6 +153,10 @@ printf 'commands:\n  test: ["ccgs-relative-probe"]\n' > "$project/project.yaml"
 if (cd "$project" && PATH=".:relative" "$test_python" -I .claude/scripts/run-project-command.py inspect test >/dev/null 2>&1); then
   fail "relative or empty PATH entry resolved a project executable"
 fi
+printf 'commands:\n  test: ["env", "PATH=.", "ccgs-relative-probe"]\n' > "$project/project.yaml"
+if (cd "$project" && "$test_python" -I .claude/scripts/run-project-command.py inspect test >/dev/null 2>&1); then
+  fail "env wrapper hid a project-local executable from approval"
+fi
 
 # F9: maintenance scripts must use the authenticated writer for every target.
 grep -F 'ccgs_safe_replace "$PY"' "$repo_root/.claude/scripts/migrate-v1-config.sh" >/dev/null \
@@ -158,6 +165,8 @@ grep -F 'ccgs_safe_replace "$REPORT"' "$repo_root/.claude/scripts/migrate-v1-con
   || fail "migration report write bypasses secure-file"
 grep -F 'ccgs_safe_append "$ARCHIVE"' "$repo_root/.claude/scripts/rotate-session-state.sh" >/dev/null \
   || fail "session archive append bypasses secure-file"
+grep -F 'ccgs_safe_delete "$f"' "$repo_root/.claude/scripts/migrate-v1-config.sh" >/dev/null \
+  || fail "migration legacy deletion bypasses secure-file"
 
 outside="$test_root/outside"
 printf 'preserve\n' > "$outside"
@@ -170,6 +179,27 @@ if ln -s "$outside" "$project/project.yaml" 2>/dev/null; then
   fi
   [ "$(cat "$outside")" = "preserve" ] || fail "migration overwrote a symlink target"
   rm -f "$project/project.yaml"
+fi
+
+linked_project="$test_root/linked-project"
+outside_production="$test_root/outside-production"
+mkdir -p "$linked_project" "$outside_production"
+cp -R "$repo_root/.claude" "$linked_project/.claude"
+printf 'Concept\n' > "$outside_production/stage.txt"
+printf 'lean\n' > "$outside_production/review-mode.txt"
+cat > "$linked_project/project.yaml" <<'YAML'
+schema_version: 1
+project:
+  stage: Concept
+modes:
+  review_mode: lean
+YAML
+if ln -s "$outside_production" "$linked_project/production" 2>/dev/null; then
+  if (cd "$linked_project" && bash .claude/scripts/migrate-v1-config.sh --finalize >/dev/null 2>&1); then
+    fail "migration finalized through a linked production directory"
+  fi
+  [ -f "$outside_production/stage.txt" ] || fail "migration deleted external stage through a linked parent"
+  [ -f "$outside_production/review-mode.txt" ] || fail "migration deleted external review mode through a linked parent"
 fi
 
 # F12: every non-staged commit creator asks, and case variants are validated.
@@ -220,6 +250,23 @@ assert_contains "$typed" "engine: Godot (project.yaml)" "engine version validati
 assert_not_contains "$typed" "platform.cert_tier: root" "invalid certification tier reached resolved output"
 assert_contains "$typed" "system_overrides: none" "invalid system override reached resolved output"
 assert_contains "$typed" "testing.strict" "testing.strict scalar skipped enum validation"
+cat > "$project/project.local.yaml" <<'YAML'
+testing:
+  strict:
+    logic: maybe
+YAML
+cat >> "$project/project.yaml" <<'YAML'
+testing:
+  strict:
+    logic: true
+YAML
+strict_leaf=$(
+  cd "$project" || exit 1
+  . .claude/hooks/yaml-helper.sh
+  resolve_config --keys testing.strict
+)
+assert_contains "$strict_leaf" "logic=true" "invalid local strictness did not fall through to committed true"
+assert_not_contains "$strict_leaf" "logic=maybe" "invalid local strictness reached resolved output"
 if grep -E 'for .*\$\(|grep .*[`$]\(find' "$repo_root/.claude/scripts/project-coherence.sh" >/dev/null; then
   fail "project-coherence still expands find output into a command"
 fi

@@ -1089,14 +1089,23 @@ full::modes.workflow=full,docs.density=thorough,qa.level=full,modes.story_granul
 # front that key. Never consulted for modes.rigor itself — that would recurse.
 _yaml_helper_rigor_value() {
   _yaml_helper_set_root
-  local path="$1" level="" line pair
+  local path="$1" level="" level_source="" line pair
   [ -z "$path" ] && return 0
   [ "$path" = "modes.rigor" ] && return 0
 
   # Resolve rigor WITHOUT resolve_setting, to keep the recursion impossible.
-  [ -f "$_YH_ROOT/project.yaml" ] && level=$(get_yaml_key "$_YH_ROOT/project.yaml" modes.rigor)
+  # The local source must still win so every rigor-fronted child follows an
+  # intentional developer-local lightweight workflow.
+  [ -f "$_YH_ROOT/project.local.yaml" ] && level=$(get_yaml_key "$_YH_ROOT/project.local.yaml" modes.rigor)
   if [ -n "$level" ] && ! validate_enum_value modes.rigor "$level" 2>/dev/null; then level=""; fi
-  if [ -n "$level" ] && ! _yaml_helper_committed_value_allowed modes.rigor "$level"; then level=""; fi
+  [ -n "$level" ] && level_source="project.local.yaml"
+  if [ -z "$level" ] && [ -f "$_YH_ROOT/project.yaml" ]; then
+    level=$(get_yaml_key "$_YH_ROOT/project.yaml" modes.rigor)
+    [ -n "$level" ] && level_source="project.yaml"
+  fi
+  if [ -n "$level" ] && ! validate_enum_value modes.rigor "$level" 2>/dev/null; then level=""; fi
+  if [ -n "$level" ] && [ "$level_source" != "project.local.yaml" ] \
+      && ! _yaml_helper_committed_value_allowed modes.rigor "$level"; then level=""; fi
   [ -z "$level" ] && level=$(get_yaml_default modes.rigor)
   [ -z "$level" ] && return 0
 
@@ -1117,10 +1126,17 @@ EOF
 # The rigor level currently in effect (for source labels and /settings).
 _yaml_helper_rigor_level() {
   _yaml_helper_set_root
-  local level=""
-  [ -f "$_YH_ROOT/project.yaml" ] && level=$(get_yaml_key "$_YH_ROOT/project.yaml" modes.rigor)
+  local level="" level_source=""
+  [ -f "$_YH_ROOT/project.local.yaml" ] && level=$(get_yaml_key "$_YH_ROOT/project.local.yaml" modes.rigor)
   if [ -n "$level" ] && ! validate_enum_value modes.rigor "$level" 2>/dev/null; then level=""; fi
-  if [ -n "$level" ] && ! _yaml_helper_committed_value_allowed modes.rigor "$level"; then level=""; fi
+  [ -n "$level" ] && level_source="project.local.yaml"
+  if [ -z "$level" ] && [ -f "$_YH_ROOT/project.yaml" ]; then
+    level=$(get_yaml_key "$_YH_ROOT/project.yaml" modes.rigor)
+    [ -n "$level" ] && level_source="project.yaml"
+  fi
+  if [ -n "$level" ] && ! validate_enum_value modes.rigor "$level" 2>/dev/null; then level=""; fi
+  if [ -n "$level" ] && [ "$level_source" != "project.local.yaml" ] \
+      && ! _yaml_helper_committed_value_allowed modes.rigor "$level"; then level=""; fi
   [ -z "$level" ] && level=$(get_yaml_default modes.rigor)
   printf '%s' "$level"
 }
@@ -1599,7 +1615,8 @@ resolve_config() {
       parent_strict=""
     fi
     for k in logic integration visual ui config; do
-      tv=$(get_effective_yaml_key "testing.strict.$k" 2>/dev/null)
+      tv=$(resolve_setting "testing.strict.$k" 2>/dev/null)
+      tv="${tv%%$(printf '\t')*}"
       [ -z "$tv" ] && tv="$parent_strict"
       ts_out="$ts_out $k=${tv:-unset}"
     done

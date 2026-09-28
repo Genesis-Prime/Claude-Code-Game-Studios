@@ -187,8 +187,19 @@ def _descriptor_operation(operation, root, parts):
             finally:
                 os.close(descriptor)
 
-        data = _read_stdin()
         lock = _acquire_write_lock(parent)
+        if operation == "delete":
+            try:
+                existing = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                return b""
+            _reject_redirect(existing, "target")
+            if not stat.S_ISREG(existing.st_mode) or existing.st_nlink != 1:
+                raise SecureFileError("delete target is not a singly-linked regular file")
+            os.unlink(name, dir_fd=parent)
+            return b""
+
+        data = _read_stdin()
         if operation == "append":
             existing = b""
             try:
@@ -257,8 +268,8 @@ def _descriptor_operation(operation, root, parts):
 
 
 def main():
-    if len(sys.argv) != 4 or sys.argv[1] not in ("append", "replace", "read", "mkdir"):
-        sys.stderr.write("secure-file: expected OPERATION ROOT RELATIVE_PATH\n")
+    if len(sys.argv) != 4 or sys.argv[1] not in ("append", "replace", "read", "mkdir", "delete"):
+        sys.stderr.write("secure-file: expected append|replace|read|mkdir|delete ROOT RELATIVE_PATH\n")
         return 2
     operation, root_arg, relative = sys.argv[1:]
     try:

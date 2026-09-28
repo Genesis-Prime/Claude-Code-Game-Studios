@@ -182,30 +182,11 @@ def _command_basename(value):
 
 def _reject_inline_code(argv):
     inspected = list(argv)
-    while _command_basename(inspected[0]) == "env":
-        index = 1
-        while index < len(inspected):
-            value = inspected[index]
-            if value == "--":
-                index += 1
-                break
-            if value in ("-u", "--unset"):
-                index += 2
-                continue
-            if value.startswith("--unset=") or value in ("-i", "--ignore-environment"):
-                index += 1
-                continue
-            if re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", value):
-                index += 1
-                continue
-            if value.startswith("-"):
-                raise CommandError("project command uses an unsupported env wrapper option")
-            break
-        if index >= len(inspected):
-            raise CommandError("project command env wrapper has no executable")
-        inspected = inspected[index:]
-
     name = _command_basename(inspected[0])
+    if name == "env":
+        raise CommandError(
+            "env wrappers are not allowed in project commands; configure the actual executable directly"
+        )
     args = [value.lower() for value in inspected[1:]]
     flags = set(args)
     if (name == "python" or name.startswith("python") or name == "py") \
