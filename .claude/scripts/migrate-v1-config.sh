@@ -190,6 +190,23 @@ for _legacy_input in "$STAGE_TXT" "$REVIEW_TXT" "$TP"; do
   fi
 done
 
+# An authenticated-read failure must never be interpreted as an empty legacy
+# value. That would let migration report that existing values agree, or write a
+# partial project.yaml, on a platform where descriptor-relative traversal is
+# unavailable. Preflight only the inputs this invocation can actually consume;
+# the shipped placeholder technical-preferences file is not legacy data.
+for _legacy_input in "$STAGE_TXT" "$REVIEW_TXT"; do
+  if [ -f "$_legacy_input" ] && ! ccgs_safe_read "$_legacy_input" "$REPO" >/dev/null; then
+    echo "REFUSED: legacy input is linked, redirected, unreadable, or unsupported on this platform: $_legacy_input" >&2
+    exit 3
+  fi
+done
+if [ -f "$TP" ] && tp_configured \
+    && ! ccgs_safe_read "$TP" "$REPO" >/dev/null; then
+  echo "REFUSED: legacy input is linked, redirected, unreadable, or unsupported on this platform: $TP" >&2
+  exit 3
+fi
+
 # A legacy file whose value project.yaml ALREADY carries is a MIRROR, not a
 # rival source of truth.
 #

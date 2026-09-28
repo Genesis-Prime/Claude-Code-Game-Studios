@@ -186,6 +186,17 @@ if ln -s "$outside" "$project/project.yaml" 2>/dev/null; then
   rm -f "$project/project.yaml"
 fi
 
+unreadable_project="$test_root/unreadable-project"
+mkdir -p "$unreadable_project/production"
+cp -R "$repo_root/.claude" "$unreadable_project/.claude"
+printf 'Concept\n' > "$unreadable_project/production/stage.txt"
+printf 'raise SystemExit(1)\n' > "$unreadable_project/.claude/hooks/secure-file.py"
+if (cd "$unreadable_project" && "$test_bash" .claude/scripts/migrate-v1-config.sh >/dev/null 2>&1); then
+  fail "migration accepted an authenticated-read failure as an empty legacy value"
+fi
+[ ! -e "$unreadable_project/project.yaml" ] \
+  || fail "migration wrote project.yaml after an authenticated-read failure"
+
 linked_project="$test_root/linked-project"
 outside_production="$test_root/outside-production"
 mkdir -p "$linked_project" "$outside_production"
