@@ -74,6 +74,11 @@
 #     review_mode=$(cat production/review-mode.txt 2>/dev/null || echo lean)
 #   fi
 
+# This file may be sourced from any working directory. Its physical location is
+# the only authority for project configuration and automatic writes.
+_YH_SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+_YH_TRUSTED_ROOT="$(CDPATH= cd -- "$_YH_SCRIPT_DIR/../.." 2>/dev/null && pwd -P)"
+
 # Resolve a working Python interpreter once per shell, cache the result.
 _yaml_helper_python=""
 _yaml_helper_resolve_python() {
@@ -357,58 +362,12 @@ PYEOF
 # Uses CWD-relative paths — callers cd into the project root first.
 # --- project root resolution -------------------------------------------------
 #
-# Config paths must NOT be resolved against the bare current working directory.
-# Run a skill or hook from a subdirectory that way and project.yaml is
-# unfindable, so EVERY setting resolves to empty -- silently, because the guard
-# that reports a missing base cannot find its files either. From the repo root
-# `modes.rigor` returns `full`; from `src/` it would return nothing.
-#
-# Being loadable from anywhere is only half the problem: the helper must also be
-# able to do its job from anywhere. Fixing one without the other leaves it
-# sourceable everywhere and functional only at the root.
-#
-# PRECEDENCE IS LOAD-BEARING, in this order:
-#   1. cwd holds project.yaml         -> cwd
-#   2. cwd holds project.local.yaml   -> cwd
-#   3. CLAUDE_PROJECT_DIR has a base  -> that directory
-#   4. nothing found                  -> cwd (unchanged behaviour)
-#
-# AN UPWARD WALK WAS IMPLEMENTED AND REMOVED, and the reason is worth keeping.
-# The intent was a fallback needing no environment variable: climb until an
-# ancestor has project.yaml. It resolves the wrong tree. A project that has a
-# legacy production/review-mode.txt and no project.yaml, sitting anywhere below
-# another project, reads the OUTER project's project.local.yaml one directory
-# up instead of its own legacy file -- the wrong answer, returned silently.
-#
-# That is not a test-harness artifact. Any real project nested inside another
-# repo that happens to carry a project.yaml would silently inherit the outer
-# project's settings, which is the same silent-wrong-answer class this whole fix
-# exists to remove. A fallback that guesses is worse than one that is absent:
-# rule 4 leaves an unconfigured directory reading its own legacy files, which is
-# exactly what a project without project.yaml should do.
-#
-# CLAUDE_PROJECT_DIR is populated in both the hook environment and the
-# skill-bootstrap environment, so rule 3 covers every way this framework
-# actually invokes the helper.
-#
-# 1 and 2 come FIRST deliberately. A project nested inside another one must read
-# ITSELF, and an ambient CLAUDE_PROJECT_DIR would otherwise point it at the
-# outer tree. Rule 2 covers the case that is easiest to lose: a directory with a
-# project.local.yaml and deliberately NO base must still raise the hard error
-# for a missing base. Without it, an upward walk finds an ancestor's
-# project.yaml and that error silently stops firing.
-#
-# Sets a variable rather than echoing a path: a $( ) per lookup would add a
-# subshell to every one of validate_yaml_enum's 23 calls, and per-lookup cost of
-# that kind is what pushes a hook past its 10s timeout.
+# Configuration is always resolved inside the repository that contains this
+# helper. A caller's cwd and CLAUDE_PROJECT_DIR are untrusted and cannot select a
+# different helper, configuration, or automatic-write destination.
 _yaml_helper_set_root() {
-  _YH_ROOT="."
-  [ -f "$_YH_ROOT/project.yaml" ] && return 0
-  [ -f "$_YH_ROOT/project.local.yaml" ] && return 0
-  if [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -f "$CLAUDE_PROJECT_DIR/project.yaml" ]; then
-    _YH_ROOT="$CLAUDE_PROJECT_DIR"; return 0
-  fi
-  return 0
+  _YH_ROOT="$_YH_TRUSTED_ROOT"
+  [ -n "$_YH_ROOT" ]
 }
 
 validate_local_yaml_base() {
@@ -471,6 +430,9 @@ performance.enforce::warn|block|off
 platform.cert_tier::none|itch|steam|console
 accessibility.target::none|standard|aaa
 engine.name::Godot|Unity|Unreal
+specialists.code::godot-gdscript-specialist|godot-csharp-specialist|unity-specialist|unreal-specialist
+specialists.shader::godot-shader-specialist|unity-shader-specialist|unreal-specialist
+specialists.ui::godot-specialist|unity-ui-specialist|ue-umg-specialist
 project.stage::Concept|Systems Design|Technical Setup|Pre-Production|Production|Polish|Release
 testing.strict.logic::true|false
 testing.strict.integration::true|false
@@ -887,19 +849,56 @@ EOF
 # the default list when unset), 1 otherwise. Used by skills in autonomous
 # mode to know which decisions still warrant a prompt.
 # Default list (when modes.automation_always_ask absent from both files):
-#   scope_changes, file_deletions, schema_changes
+#   scope_changes, file_deletions, schema_changes, command_execution
 _yaml_helper_always_ask_default="scope_changes
 file_deletions
-schema_changes"
+schema_changes
+command_execution"
+_yaml_helper_always_ask_recognized="scope_changes
+file_deletions
+schema_changes
+command_execution
+architecture_decisions
+version_bumps
+external_calls"
+
+_yaml_helper_known_ask_category() {
+  case "$1" in
+    scope_changes|file_deletions|schema_changes|command_execution|architecture_decisions|version_bumps|external_calls) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+effective_always_ask_categories() {
+  local configured item effective="$_yaml_helper_always_ask_default"
+  configured=$(get_effective_yaml_array modes.automation_always_ask)
+  while IFS= read -r item; do
+    [ -z "$item" ] && continue
+    if ! _yaml_helper_known_ask_category "$item"; then
+      echo "Invalid modes.automation_always_ask category '$item' ignored; safety defaults remain active." >&2
+      continue
+    fi
+    case "
+$effective
+" in
+      *"
+$item
+"*) ;;
+      *) effective="$effective
+$item" ;;
+    esac
+  done <<EOF
+$configured
+EOF
+  printf '%s\n' "$effective"
+}
 
 is_always_ask_category() {
   local category="$1"
   [ -z "$category" ] && return 1
+  _yaml_helper_known_ask_category "$category" || return 1
   local configured
-  configured=$(get_effective_yaml_array modes.automation_always_ask)
-  if [ -z "$configured" ]; then
-    configured="$_yaml_helper_always_ask_default"
-  fi
+  configured=$(effective_always_ask_categories)
   local item
   while IFS= read -r item; do
     [ -z "$item" ] && continue
@@ -921,14 +920,15 @@ log_decision() {
   local chosen="$4"
   local reason="$5"
   local category="$6"
-  local logfile="$_YH_ROOT/production/session-logs/decision-log.md"
-  mkdir -p "$(dirname "$logfile")"
-  if [ ! -f "$logfile" ]; then
-    printf '# Decision Log\n\nAppend-only audit trail of decisions made in autonomous mode.\n' > "$logfile"
+  local logfile="production/session-logs/decision-log.md"
+  . "$_YH_SCRIPT_DIR/path-security.sh" 2>/dev/null || return 1
+  if ! ccgs_safe_read "$logfile" "$_YH_ROOT" >/dev/null 2>&1; then
+    printf '# Decision Log\n\nAppend-only audit trail of decisions made in autonomous mode.\n' \
+      | ccgs_safe_replace "$logfile" "$_YH_ROOT" || return 1
   fi
   local timestamp
   timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u)
-  cat >> "$logfile" <<EOF
+  cat <<EOF | ccgs_safe_append "$logfile" "$_YH_ROOT"
 
 ## $timestamp — $skill
 
@@ -1415,12 +1415,8 @@ resolve_config() {
   # automation_always_ask: array-valued, so it does not go through resolve_setting.
   local aaa
   if _rc_want automation_always_ask; then
-    aaa=$(get_effective_yaml_array modes.automation_always_ask 2>/dev/null)
-    if [ -n "$aaa" ]; then
-      echo "automation_always_ask: $(echo "$aaa" | tr '\n' ',' | sed 's/,$//; s/,/, /g') (configured)"
-    else
-      echo "automation_always_ask: $(echo "$_yaml_helper_always_ask_default" | tr '\n' ',' | sed 's/,$//; s/,/, /g') (default)"
-    fi
+    aaa=$(effective_always_ask_categories)
+    echo "automation_always_ask: $(echo "$aaa" | tr '\n' ',' | sed 's/,$//; s/,/, /g') (safety baseline plus configured categories)"
   fi
 
   # engine: project.yaml only. No markdown reader is built here — skills keep
@@ -1565,22 +1561,11 @@ EOF
 # Only resolve_config is dispatchable: the bootstrap is the one caller, and
 # every name added here widens what a skill grant can reach.
 #
-# ROOT. Run from a subdirectory, the skill shell's cwd has no project.yaml and
-# $CLAUDE_PROJECT_DIR is the launch directory, not the repo root (measured), so
-# rules 1-3 of _yaml_helper_set_root all miss. This file's own location is the
-# one anchor that cannot drift: hooks/ sits two levels below the root. It only
-# fills CLAUDE_PROJECT_DIR when that has no project.yaml, so rules 1-2 (cwd
-# first, for nested projects) keep their precedence.
-#
 # ALWAYS exits 0: a non-zero exit from an injected command aborts the skill.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   case "${1:-}" in
     resolve_config)
       shift
-      if [ -z "${CLAUDE_PROJECT_DIR:-}" ] || [ ! -f "$CLAUDE_PROJECT_DIR/project.yaml" ]; then
-        _yh_self_root=$(cd "$(dirname "$0")/../.." 2>/dev/null && pwd)
-        [ -n "$_yh_self_root" ] && CLAUDE_PROJECT_DIR="$_yh_self_root"
-      fi
       resolve_config "$@"
       ;;
     *)

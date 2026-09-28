@@ -228,11 +228,12 @@ Create `Source/Tests/README.md`:
 ```markdown
 # Unreal Automation Tests
 Tests use the UE Automation Testing Framework.
-Run via: Session Frontend → Automation → select "MyGame." tests
-Or headlessly: UnrealEditor -nullrhi -ExecCmds="Automation RunTests MyGame.; Quit"
+Run via: Session Frontend → Automation → select the configured test namespace.
+For a headless run, inspect and approve the typed `commands.test` profile from
+`project.yaml` through `.claude/scripts/run-project-command.py`.
 
 Test class naming: F[SystemName]Test
-Test category naming: "MyGame.[System].[Feature]"
+Test category naming: "<ValidatedNamespace>.[System].[Feature]"
 ```
 
 ---
@@ -374,12 +375,34 @@ jobs:
           persist-credentials: false
 
       - name: Run Automation Tests
+        shell: python
         run: |
-          "$UE_EDITOR_PATH" "${{ github.workspace }}/[ProjectName].uproject" \
-            -nullrhi -nosound \
-            -ExecCmds="Automation RunTests MyGame.; Quit" \
-            -log -unattended
-        shell: bash
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          editor = os.environ.get("UE_EDITOR_PATH", "")
+          namespace = os.environ.get("UE_TEST_NAMESPACE", "")
+          projects = [
+              item for item in Path.cwd().glob("*.uproject")
+              if item.is_file() and not item.is_symlink()
+          ]
+          if len(projects) != 1:
+              raise SystemExit("expected exactly one regular .uproject at the workspace root")
+          if not editor or not Path(editor).is_file():
+              raise SystemExit("UE_EDITOR_PATH must name the installed editor executable")
+          if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]*", namespace):
+              raise SystemExit("UE_TEST_NAMESPACE must match [A-Za-z][A-Za-z0-9_]*")
+          subprocess.run([
+              editor,
+              str(projects[0].resolve()),
+              "-nullrhi",
+              "-nosound",
+              f"-ExecCmds=Automation RunTests {namespace}; Quit",
+              "-log",
+              "-unattended",
+          ], check=True)
 
       - name: Upload Logs
         if: always()
@@ -389,13 +412,16 @@ jobs:
           path: Saved/Logs/
 ```
 
-Note: UE CI requires a self-hosted runner with Unreal Editor installed. Set the
-`UE_EDITOR_PATH` environment variable on the runner. Keep persistent runners
-restricted to trusted events such as pushes to protected branches. If pull
-request testing is required, use a separate workflow and runner fleet that is
-ephemeral, isolated per job, contains no credentials beyond the job's minimal
-read-only token, and is destroyed after execution. Never run pull request code
-on a persistent Unreal build machine.
+Note: UE CI requires a self-hosted runner with Unreal Editor and Python installed.
+Set `UE_EDITOR_PATH` to the editor executable and `UE_TEST_NAMESPACE` to the
+validated automation namespace on the runner. The workflow requires exactly one
+regular `.uproject` at the workspace root and passes every value as a process
+argument without a shell. Keep persistent runners restricted to trusted events
+such as pushes to protected branches. If pull request testing is required, use
+a separate workflow and runner fleet that is ephemeral, isolated per job,
+contains no credentials beyond the job's minimal read-only token, and is
+destroyed after execution. Never run pull request code on a persistent Unreal
+build machine.
 
 ---
 

@@ -1,34 +1,11 @@
 #!/usr/bin/env bash
 
-# --- work from the project root ----------------------------------------------
-# Every path below is repo-relative, so a hook invoked with a working directory
-# that is not the repo root would silently read and write the WRONG TREE --
-# returning a near-empty result instead of the session-recovery block, and
-# creating stray trees such as docs/production/session-logs/ on write.
-#
-# PRECEDENCE IS LOAD-BEARING. A cwd that IS a project root carries real
-# information and must win: a caller sitting inside another project means that
-# project, not this one. Resolving to the script's own location first would
-# override them. So, in order:
-#   1. cwd holds project.yaml   -> cwd   (a project root)
-#   2. cwd holds .claude/       -> cwd   (a project root not yet configured)
-#   3. CLAUDE_PROJECT_DIR       -> that  (populated in the hook environment)
-#   4. this script's location   -> <root>/.claude/hooks/../.. by construction
-# Rule 4 always works and needs no environment at all; rules 1-2 stop it from
-# overriding a caller that legitimately means somewhere else.
-#
-# NOT an upward search: that resolves a nested project to its parent's config.
-if [ -f "project.yaml" ] || [ -d ".claude" ]; then
-  CCGS_ROOT="$PWD"
-elif [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "${CLAUDE_PROJECT_DIR}" ]; then
-  CCGS_ROOT="$CLAUDE_PROJECT_DIR"
-else
-  CCGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." 2>/dev/null && pwd)"
-fi
-[ -n "$CCGS_ROOT" ] && cd "$CCGS_ROOT" 2>/dev/null || true
-if [ -f .claude/hooks/path-security.sh ]; then
-  . .claude/hooks/path-security.sh
-fi
+# Resolve every executable and data path from this status line's repository.
+_CCGS_CLAUDE_DIR="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+[ -n "$_CCGS_CLAUDE_DIR" ] || exit 0
+. "$_CCGS_CLAUDE_DIR/hooks/trusted-root.sh" 2>/dev/null || exit 0
+ccgs_bootstrap_trusted_root "$_CCGS_CLAUDE_DIR/.." || exit 0
+. "$_CCGS_CLAUDE_DIR/hooks/path-security.sh" 2>/dev/null || exit 0
 
 # Claude Code Game Studios — Status Line
 # Receives JSON on stdin, outputs a single-line status.
@@ -41,17 +18,18 @@ input=$(cat)
 if command -v jq &>/dev/null; then
   model=$(echo "$input" | jq -r '.model.display_name // "Unknown"')
   used_pct=$(echo "$input" | jq -r '.context_window.used_percentage // empty')
-  cwd=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // ""')
+  event_cwd=$(echo "$input" | jq -r '.workspace.current_dir // .cwd // ""')
 else
   model=$(echo "$input" | grep -oE '"display_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*: *"//;s/"//')
   used_pct=$(echo "$input" | grep -oE '"used_percentage"[[:space:]]*:[[:space:]]*[0-9]+' | head -1 | sed 's/.*: *//')
-  cwd=$(echo "$input" | grep -oE '"current_dir"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*: *"//;s/"//')
+  event_cwd=$(echo "$input" | grep -oE '"current_dir"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*: *"//;s/"//')
   [ -z "$model" ] && model="Unknown"
 fi
 
-# Normalize Windows paths
-cwd=$(echo "$cwd" | sed 's|\\|/|g')
-[ -z "$cwd" ] && cwd="."
+# Event cwd is presentation data only. It never selects code, configuration,
+# or state. All reads below stay under the authenticated script root.
+event_cwd=$(echo "$event_cwd" | sed 's|\\|/|g')
+cwd="$CCGS_ROOT"
 
 # --- Context usage ---
 if [ -n "$used_pct" ]; then
@@ -64,7 +42,7 @@ fi
 # Priority 1: project.stage from project.yaml
 stage=""
 project_yaml="$cwd/project.yaml"
-yaml_helper="$cwd/.claude/hooks/yaml-helper.sh"
+yaml_helper="$_CCGS_CLAUDE_DIR/hooks/yaml-helper.sh"
 if [ -f "$project_yaml" ] && [ -f "$yaml_helper" ]; then
   source "$yaml_helper"
   stage=$(get_yaml_key "$project_yaml" project.stage 2>/dev/null)

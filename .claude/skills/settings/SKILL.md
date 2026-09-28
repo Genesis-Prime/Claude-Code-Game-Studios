@@ -16,10 +16,8 @@ settings or change them without manually editing YAML.
 **Automation mode**: Resolve `modes.automation` (`project.local.yaml` →
 `project.yaml` → default `collaborative`). The approval gates in Phase 4 and
 Phase 5 follow the pattern in `.claude/docs/automation-modes.md`. **Note**:
-writing to `project.yaml` is a `schema_changes` decision (a default
-`automation_always_ask` category), so `/settings` confirms config writes even
-in `autonomous` mode unless the user has removed `schema_changes` from their
-always-ask list.
+writing to `project.yaml` is a `schema_changes` decision in the immutable safety
+baseline, so `/settings` confirms config writes even in `autonomous` mode.
 
 ## Phase 0: Parse Arguments
 
@@ -295,6 +293,14 @@ When the effective value is empty (key not set anywhere), print just:
 ## Phase 4: Set-yaml Mode
 
 (when `<key>=<value>`, no `--local`)
+
+0. **Typed-value boundary**: if `<key>` is `commands.build`, `commands.test`,
+   `commands.run`, or `commands.smoke`, refuse the scalar write. Say that command
+   profiles must be JSON-style argv arrays written by `/setup-engine` or by an
+   explicitly reviewed manual edit, then inspected through
+   `.claude/scripts/run-project-command.py`. If `<key>` is
+   `specialists.additional`, also refuse the scalar write because that field is
+   a bounded array. Do not turn either value into YAML text.
 
 1. **Schema validation**: call `validate_enum_value <key> <value>`. If
    it returns 1, the stderr line is shown to the user verbatim

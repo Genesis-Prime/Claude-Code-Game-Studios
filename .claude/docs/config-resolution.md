@@ -84,7 +84,7 @@ story_granularity: balanced (default)
 qa.level: standard (default)
 team.size: individual (rigor:standard)
 project.stage: Systems Design (production/stage.txt)
-automation_always_ask: scope_changes, file_deletions, schema_changes (default)
+automation_always_ask: scope_changes, file_deletions, schema_changes, command_execution (immutable baseline)
 engine: Godot 4.6 (project.yaml)
 testing.strict: logic=true integration=false visual=unset ui=unset config=unset (unset = each skill applies its own default)
 system_overrides: combat=full inventory=minimal
@@ -163,7 +163,7 @@ default rather than propagating a nonsense mode into every skill.
 |---|---|
 | `modes.automation` | `collaborative` |
 | `modes.rigor` | `minimal` |
-| `modes.automation_always_ask` | `scope_changes`, `file_deletions`, `schema_changes` |
+| `modes.automation_always_ask` | immutable `scope_changes`, `file_deletions`, `schema_changes`, `command_execution`, plus validated configured categories |
 
 **The six knobs `rigor` fronts have no terminal default at all.** `modes.workflow`,
 `docs.density`, `qa.level`, `modes.story_granularity`, `modes.review_mode` and `team.size` are

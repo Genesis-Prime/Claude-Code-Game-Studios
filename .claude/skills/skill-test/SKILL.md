@@ -180,6 +180,15 @@ Find skill at `.claude/skills/[name]/SKILL.md`.
 Look up the spec path from `CCGS Skill Testing Framework/catalog.yaml` — use the
 `spec:` field for the matching skill entry.
 
+Treat the catalog value as untrusted data. Accept `[name]` and the catalog
+`category` only when each matches `^[a-z0-9][a-z0-9-]*$`. Derive the only
+readable spec path as
+`CCGS Skill Testing Framework/skills/[category]/[name].md`; never pass the raw
+`spec:` value to Read or Glob. The catalog `spec:` value must exactly equal that
+derived path. Reject absolute paths, drive or UNC paths, backslashes, control
+characters, empty components, `.` and `..` as `NOT ASSESSED — unsafe catalog
+path`. Read only the exact derived path under the fixed framework directory.
+
 If either is missing:
 - Missing skill: "Skill '[name]' not found in `.claude/skills/`."
 - Missing spec path in catalog: "No spec path set for '[name]' in catalog.yaml."
@@ -335,7 +344,11 @@ complete list of agents.
 ### Step 3 — Build Skill Coverage Table
 
 For each skill:
-- Check if a spec file exists (use the `spec:` path from catalog, or glob `CCGS Skill Testing Framework/skills/*/[name].md`)
+- Validate skill and category slugs with `^[a-z0-9][a-z0-9-]*$`, derive
+  `CCGS Skill Testing Framework/skills/[category]/[name].md`, and require the
+  catalog `spec:` value to match it exactly. Never read a raw catalog path.
+- Check whether that exact derived spec file exists. Do not use a recursive or
+  catalog-controlled glob.
 - Look up `last_static`, `last_static_result`, `last_spec`, `last_spec_result`,
   `last_category`, `last_category_result`, `category` from catalog (or mark as
   "never" / "—" if not in catalog)
@@ -344,7 +357,9 @@ For each skill:
 ### Step 3b — Build Agent Coverage Table
 
 For each agent in catalog's `agents:` section:
-- Check if a spec file exists (use the `spec:` path from catalog, or glob `CCGS Skill Testing Framework/agents/*/[name].md`)
+- Apply the same slug and exact-path rule, deriving
+  `CCGS Skill Testing Framework/agents/[category]/[name].md`. An unsafe or
+  mismatched catalog path is `NOT ASSESSED`, and must not be read.
 - Look up `last_spec`, `last_spec_result`, `category` from catalog
 
 ### Step 4 — Output Report

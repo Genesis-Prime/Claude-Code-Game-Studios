@@ -9,8 +9,6 @@ be committed to version control. Add it to `.gitignore`.
 {
   "permissions": {
     "allow": [
-      "Bash(git *)",
-      "Bash(npm *)",
       "Read",
       "Glob",
       "Grep"
@@ -22,6 +20,10 @@ be committed to version control. Add it to `.gitignore`.
   }
 }
 ```
+
+Keep Bash commands approval-gated. Wildcard Git, package-manager, Python, and
+test-runner grants can execute repository-controlled helpers, plugins, or code
+even when the command appears read-only.
 
 ## Permission Modes
 
@@ -52,7 +54,7 @@ the project hooks. For example, adding a notification when builds complete:
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'echo Session ended at $(date)'",
+            "command": "date -u",
             "timeout": 5
           }
         ]

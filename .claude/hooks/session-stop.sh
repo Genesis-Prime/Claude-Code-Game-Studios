@@ -1,49 +1,24 @@
 #!/bin/bash
 
-# --- work from the project root ----------------------------------------------
-# Every path below is repo-relative, so a hook invoked with a working directory
-# that is not the repo root would silently read and write the WRONG TREE --
-# returning a near-empty result instead of the session-recovery block, and
-# creating stray trees such as docs/production/session-logs/ on write.
-#
-# PRECEDENCE IS LOAD-BEARING. A cwd that IS a project root carries real
-# information and must win: a caller sitting inside another project means that
-# project, not this one. Resolving to the script's own location first would
-# override them. So, in order:
-#   1. cwd holds project.yaml   -> cwd   (a project root)
-#   2. cwd holds .claude/       -> cwd   (a project root not yet configured)
-#   3. CLAUDE_PROJECT_DIR       -> that  (populated in the hook environment)
-#   4. this script's location   -> <root>/.claude/hooks/../.. by construction
-# Rule 4 always works and needs no environment at all; rules 1-2 stop it from
-# overriding a caller that legitimately means somewhere else.
-#
-# NOT an upward search: that resolves a nested project to its parent's config.
-if [ -f "project.yaml" ] || [ -d ".claude" ]; then
-  CCGS_ROOT="$PWD"
-elif [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "${CLAUDE_PROJECT_DIR}" ]; then
-  CCGS_ROOT="$CLAUDE_PROJECT_DIR"
-else
-  CCGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
-fi
-[ -n "$CCGS_ROOT" ] && cd "$CCGS_ROOT" 2>/dev/null || true
-if [ -f .claude/hooks/path-security.sh ]; then
-    . .claude/hooks/path-security.sh
-fi
+# Resolve every executable and data path from this hook's own repository.
+_CCGS_HOOK_DIR="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+[ -n "$_CCGS_HOOK_DIR" ] || exit 0
+. "$_CCGS_HOOK_DIR/trusted-root.sh" 2>/dev/null || exit 0
+ccgs_bootstrap_trusted_root "$_CCGS_HOOK_DIR/../.." || exit 0
+. "$_CCGS_HOOK_DIR/path-security.sh" 2>/dev/null || exit 0
 
 # Claude Code Stop hook: Log session summary when Claude finishes
 # Records what was worked on for audit trail and sprint tracking
 
 # features.session_state: off => this hook is a no-op. Default `on`; see
 # session_state_enabled() in yaml-helper.sh.
-if [ -f .claude/hooks/yaml-helper.sh ]; then
-    . .claude/hooks/yaml-helper.sh
+if [ -f "$_CCGS_HOOK_DIR/yaml-helper.sh" ]; then
+    . "$_CCGS_HOOK_DIR/yaml-helper.sh"
     session_state_enabled || exit 0
 fi
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 SESSION_LOG_DIR="production/session-logs"
-
-mkdir -p "$SESSION_LOG_DIR" 2>/dev/null
 
 # Log recent git activity from this session (check up to 8 hours for long sessions)
 RECENT_COMMITS=$(git log --oneline --since="8 hours ago" 2>/dev/null)
@@ -75,23 +50,24 @@ STATE_FILE="production/session-state/active.md"
 STATE_HASH_FILE="$SESSION_LOG_DIR/.active-state.hash"
 if command -v ccgs_session_state_path_present >/dev/null 2>&1 \
     && ccgs_session_state_path_present "$CCGS_ROOT"; then
-    STATE_SNAPSHOT=$(mktemp "$SESSION_LOG_DIR/.active-state.XXXXXX" 2>/dev/null)
-    if [ -n "$STATE_SNAPSHOT" ]; then
-        trap '[ -n "${STATE_SNAPSHOT:-}" ] && rm -f -- "$STATE_SNAPSHOT"' EXIT
-        if ccgs_read_session_state "$CCGS_ROOT" > "$STATE_SNAPSHOT"; then
-            STATE_HASH=$(git hash-object -- "$STATE_SNAPSHOT" 2>/dev/null)
-            if [ -z "$STATE_HASH" ] || [ "$STATE_HASH" != "$(cat "$STATE_HASH_FILE" 2>/dev/null)" ]; then
-                {
-                    echo "## Archived Session State: $TIMESTAMP"
-                    cat "$STATE_SNAPSHOT"
-                    echo "---"
-                    echo ""
-                } >> "$SESSION_LOG_DIR/session-log.md" 2>/dev/null
-                [ -n "$STATE_HASH" ] && printf '%s\n' "$STATE_HASH" > "$STATE_HASH_FILE" 2>/dev/null
+    if STATE_CONTENT=$(ccgs_read_session_state "$CCGS_ROOT"); then
+        STATE_HASH=$(printf '%s\n' "$STATE_CONTENT" | git hash-object --stdin 2>/dev/null)
+        PREVIOUS_STATE_HASH=$(ccgs_safe_read "$STATE_HASH_FILE" 2>/dev/null || true)
+        if [ -z "$STATE_HASH" ] || [ "$STATE_HASH" != "$PREVIOUS_STATE_HASH" ]; then
+            if {
+                echo "## Archived Session State: $TIMESTAMP"
+                printf '%s\n' "$STATE_CONTENT"
+                echo "---"
+                echo ""
+            } | ccgs_safe_append "$SESSION_LOG_DIR/session-log.md"; then
+                if [ -n "$STATE_HASH" ] \
+                    && ! printf '%s\n' "$STATE_HASH" | ccgs_safe_replace "$STATE_HASH_FILE"; then
+                    echo "session-stop: secure state hash update failed" >&2
+                fi
+            else
+                echo "session-stop: secure state archive append failed; hash not advanced" >&2
             fi
         fi
-        rm -f -- "$STATE_SNAPSHOT"
-        STATE_SNAPSHOT=""
     fi
 fi
 
@@ -101,8 +77,9 @@ if [ -n "$RECENT_COMMITS" ] || [ -n "$MODIFIED_FILES" ]; then
     # which differs every firing and would defeat the comparison entirely.
     SUMMARY_HASH=$(printf '%s\n---\n%s' "$RECENT_COMMITS" "$MODIFIED_FILES" \
                    | git hash-object --stdin 2>/dev/null)
-    if [ -z "$SUMMARY_HASH" ] || [ "$SUMMARY_HASH" != "$(cat "$SUMMARY_HASH_FILE" 2>/dev/null)" ]; then
-        {
+    PREVIOUS_SUMMARY_HASH=$(ccgs_safe_read "$SUMMARY_HASH_FILE" 2>/dev/null || true)
+    if [ -z "$SUMMARY_HASH" ] || [ "$SUMMARY_HASH" != "$PREVIOUS_SUMMARY_HASH" ]; then
+        if {
             echo "## Session End: $TIMESTAMP"
             if [ -n "$RECENT_COMMITS" ]; then
                 echo "### Commits"
@@ -114,8 +91,14 @@ if [ -n "$RECENT_COMMITS" ] || [ -n "$MODIFIED_FILES" ]; then
             fi
             echo "---"
             echo ""
-        } >> "$SESSION_LOG_DIR/session-log.md" 2>/dev/null
-        [ -n "$SUMMARY_HASH" ] && printf '%s\n' "$SUMMARY_HASH" > "$SUMMARY_HASH_FILE" 2>/dev/null
+        } | ccgs_safe_append "$SESSION_LOG_DIR/session-log.md"; then
+            if [ -n "$SUMMARY_HASH" ] \
+                && ! printf '%s\n' "$SUMMARY_HASH" | ccgs_safe_replace "$SUMMARY_HASH_FILE"; then
+                echo "session-stop: secure summary hash update failed" >&2
+            fi
+        else
+            echo "session-stop: secure session summary append failed; hash not advanced" >&2
+        fi
     fi
 fi
 
@@ -130,13 +113,14 @@ fi
 # to that. Read last, fail silent.
 AUDIT_LOG="$SESSION_LOG_DIR/agent-audit.log"
 
-if [ ! -t 0 ] && [ -f "$AUDIT_LOG" ]; then
+if [ ! -t 0 ]; then
     if command -v timeout >/dev/null 2>&1; then
         INPUT=$(timeout 2 cat 2>/dev/null)
     else
         INPUT=$(cat 2>/dev/null)
     fi
 
+    AUDIT_CONTENT=$(ccgs_safe_read "$AUDIT_LOG" 2>/dev/null || true)
     if command -v jq >/dev/null 2>&1; then
         SESSION_ID=$(echo "$INPUT" | jq -r '.session_id // ""' 2>/dev/null)
     else
@@ -146,7 +130,7 @@ if [ ! -t 0 ] && [ -f "$AUDIT_LOG" ]; then
     # No session id means no honest per-session number. Report nothing rather
     # than a total that silently spans every session in the log.
     if [ -n "$SESSION_ID" ] && [ "$SESSION_ID" != "unknown" ] && [ "$SESSION_ID" != "null" ]; then
-        SPAWN_LINES=$(grep -F " | $SESSION_ID | Agent invoked: " "$AUDIT_LOG" 2>/dev/null)
+        SPAWN_LINES=$(printf '%s\n' "$AUDIT_CONTENT" | grep -F " | $SESSION_ID | Agent invoked: " 2>/dev/null)
         SPAWN_COUNT=$(printf '%s' "$SPAWN_LINES" | grep -c . 2>/dev/null)
         [ -z "$SPAWN_COUNT" ] && SPAWN_COUNT=0
 
@@ -173,7 +157,8 @@ if [ ! -t 0 ] && [ -f "$AUDIT_LOG" ]; then
                 echo "Each spawn is a fresh context window that re-reads its own inputs."
                 echo "To reduce this: lower \`modes.review_mode\` (\`/settings modes.review_mode=solo\`)"
                 echo "or \`modes.rigor\` (\`/settings modes.rigor=minimal\`)."
-            } > "$SESSION_LOG_DIR/session-cost.md" 2>/dev/null
+            } | ccgs_safe_replace "$SESSION_LOG_DIR/session-cost.md" \
+                || echo "session-stop: secure cost summary update failed" >&2
 
             echo "Subagent spawns this session: $SPAWN_COUNT (see production/session-logs/session-cost.md)"
         fi

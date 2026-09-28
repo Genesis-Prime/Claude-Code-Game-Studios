@@ -127,23 +127,23 @@ Even in `autonomous` mode, certain decision categories ALWAYS trigger
 `AskUserQuestion`. The configured list lives at
 `modes.automation_always_ask` in `project.yaml`.
 
-**Default** (when unset): `[scope_changes, file_deletions, schema_changes]`.
+**Immutable safety baseline**: `[scope_changes, file_deletions,
+schema_changes, command_execution]`. Configured recognized categories are added
+to this baseline; they cannot remove it. Unknown categories are rejected and
+reported.
 
 ### Recognized categories
 
-**This table is the set you may configure, NOT the set that always asks.** Only
-the categories actually listed in `modes.automation_always_ask` — the three
-defaults above, unless the project overrides them — interrupt an `autonomous`
-run. The other rows do nothing until a project opts into them. Read the resolved
-list with `resolve_config` rather than assuming a row here is active; a real run
-logged two `architecture_decisions` as rule violations on a project where that
-category was never configured.
+The first three categories always interrupt an `autonomous` run. The remaining
+recognized categories do so when configured. Read the resolved list with
+`resolve_config` rather than inferring it from this table.
 
 | Category | Examples of decisions in this category |
 |----------|----------------------------------------|
 | `scope_changes` | Cutting a feature, slipping a deadline, splitting/merging an epic, removing acceptance criteria |
 | `file_deletions` | Removing a story, deleting a GDD, removing a system, removing a test file |
 | `schema_changes` | Changes to project.yaml, story template, control manifest, ADR template, GDD template |
+| `command_execution` | Running build, test, smoke, launch, migration, or other project-configured commands |
 | `architecture_decisions` | New ADR creation, ADR replacement, system boundary changes |
 | `version_bumps` | Engine version change, framework version bump, dependency major version change |
 | `external_calls` | Invoking external APIs (asset gen, AI services) when in autonomous mode |
@@ -154,9 +154,9 @@ category was never configured.
 is_always_ask_category <category>
 ```
 
-Returns 0 if the named category is in `modes.automation_always_ask`,
-1 otherwise. Skills use this at decision points that fall into any
-of the six categories above.
+Returns 0 if the named category is in the immutable baseline or the validated
+configured additions, 1 otherwise. Skills use this at decision points that fall
+into any recognized category above.
 
 ---
 
@@ -246,7 +246,7 @@ At each decision point in this skill:
 
 1. Classify the decision: major or minor (see §Major vs Minor above).
 2. Check whether the decision falls into an `automation_always_ask`
-   category: scope_changes, file_deletions, schema_changes,
+   category: scope_changes, file_deletions, schema_changes, command_execution,
    architecture_decisions, version_bumps, external_calls.
 3. Apply the mode rule:
 
