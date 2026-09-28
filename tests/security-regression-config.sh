@@ -20,6 +20,10 @@ for candidate in python python3 py; do
   fi
 done
 [ -n "$test_python" ] || fail "Python 3 isolated mode is required"
+test_bash=$(command -v bash) || fail "bash is required"
+if command -v cygpath >/dev/null 2>&1; then
+  test_bash=$(cygpath -w "$test_bash")
+fi
 
 mkdir -p "$project"
 cp -R "$repo_root/.claude" "$project/.claude"
@@ -118,16 +122,17 @@ legacy_review=$(
 assert_contains "$legacy_review" "lean" "legacy review mirror beat an existing project.yaml"
 
 # F8a: a long malformed line must not consume the hook timeout budget.
-"$test_python" -I - "$project" <<'PY' || fail "bounded YAML parser timed out"
+"$test_python" -I - "$project" "$test_bash" <<'PY' || fail "bounded YAML parser timed out"
 from pathlib import Path
 import os
 import subprocess
 import sys
 
 root = Path(sys.argv[1])
+bash = sys.argv[2]
 (root / "project.yaml").write_text("k" + " " * 50000 + "v\n", encoding="utf-8")
 subprocess.run(
-    ["bash", "-c", ". .claude/hooks/yaml-helper.sh; resolve_setting modes.workflow >/dev/null"],
+    [bash, "-c", ". .claude/hooks/yaml-helper.sh; resolve_setting modes.workflow >/dev/null"],
     cwd=str(root), check=True, timeout=2,
     env=dict(os.environ, CLAUDE_PROJECT_DIR=str(root)),
 )

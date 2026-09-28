@@ -20,6 +20,10 @@ for candidate in python python3 py; do
   fi
 done
 [ -n "$test_python" ] || fail "Python 3 isolated mode is required"
+test_bash=$(command -v bash) || fail "bash is required"
+if command -v cygpath >/dev/null 2>&1; then
+  test_bash=$(cygpath -w "$test_bash")
+fi
 
 mkdir -p "$project"
 cp -R "$repo_root/.claude" "$project/.claude"
@@ -113,13 +117,14 @@ Task: early-checkpoint
 <!-- /CHECKPOINT -->
 STATE
 if ln -s "$test_root" "$project/src" 2>/dev/null; then
-  startup_output=$("$test_python" -I - "$project" <<'PY'
+  startup_output=$("$test_python" -I - "$project" "$test_bash" <<'PY'
 import os
 import subprocess
 import sys
 root = sys.argv[1]
+bash = sys.argv[2]
 result = subprocess.run(
-    ["bash", ".claude/hooks/session-start.sh"], cwd=root,
+    [bash, ".claude/hooks/session-start.sh"], cwd=root,
     input=b'{"source":"startup"}\n', stdout=subprocess.PIPE,
     stderr=subprocess.STDOUT, timeout=3,
     env=dict(os.environ, CLAUDE_PROJECT_DIR=root),
