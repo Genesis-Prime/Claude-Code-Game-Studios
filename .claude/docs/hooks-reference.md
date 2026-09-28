@@ -4,8 +4,9 @@ Hooks are configured in `.claude/settings.json` and fire automatically:
 
 | Hook | Event | Trigger | Action |
 | ---- | ----- | ------- | ------ |
-| `validate-commit.sh` | PreToolUse (Bash) | `git commit` commands | Validates design doc sections, JSON data files, hardcoded values, TODO format |
-| `validate-push.sh` | PreToolUse (Bash) | `git push` commands | Warns on pushes to protected branches (develop/main) |
+| `validate-commit.sh` | PreToolUse (Bash) | Classified `git commit` commands | Validates exact index blobs for design sections, JSON data, hardcoded values, and TODO format |
+| `validate-push.sh` | PreToolUse (Bash) | Classified `git push` commands | Warns on pushes affecting protected branches (develop/main/master), including full refspecs |
+| `validate-agent.sh` | PreToolUse (Agent/Task) | Agent requests | Blocks agent types outside the reviewed framework roster |
 | `validate-assets.sh` | PostToolUse (Write/Edit) | Asset file changes | Checks naming conventions and JSON validity for files in `assets/` |
 | `session-start.sh` | SessionStart | Session begins | Loads sprint context, milestone, git activity; previews a validated snapshot of active session state for recovery |
 | `detect-gaps.sh` | SessionStart | Session begins | Detects fresh projects (suggests /start) and missing documentation when code/prototypes exist, suggests /reverse-document or /project-stage-detect |
@@ -24,6 +25,14 @@ hard links, non-regular files, files larger than 1 MiB, path or content changes
 during the read, and NUL bytes. Callers use the bytes read from one validated
 descriptor and never reopen `active.md`.
 Without Python 3 isolated mode, automatic checkpoint consumption fails closed.
+
+Automatic append, replace, read, and directory-creation operations use
+handle-relative traversal and parent-directory locks. Python does not expose
+that primitive on native Windows, so `secure-file.py` refuses those operations
+there and the calling hook emits a diagnostic instead of falling back to a
+path-based write that could race a junction swap. The separate validated
+checkpoint reader remains available; persistent session and audit log updates
+require a POSIX platform until a native Windows handle implementation lands.
 
 ### Subagent cost visibility
 

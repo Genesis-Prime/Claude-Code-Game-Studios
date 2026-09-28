@@ -54,6 +54,141 @@ for candidate in python python3 py; do
   fi
 done
 [ -n "$test_python" ] || fail "Python 3 isolated mode is required for this regression suite"
+test_os=$("$test_python" -I -c 'import os; print(os.name)') \
+  || fail "could not determine the native Python platform"
+
+# Exercise the no-descriptor platform branch on every runner. Native Windows
+# reaches the same branch without simulation; POSIX runners monkeypatch only
+# the feature probe so the fail-closed contract cannot silently regress.
+"$test_python" -I - "$project/.claude/hooks/secure-file.py" "$test_root" <<'PY' \
+  || fail "secure writer did not fail closed without handle-relative traversal"
+import contextlib
+import importlib.util
+import io
+import os
+import pathlib
+import sys
+
+helper, root_arg = sys.argv[1:]
+spec = importlib.util.spec_from_file_location("ccgs_secure_file_probe", helper)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+root = os.path.realpath(root_arg)
+module._supports_descriptor_walk = lambda: False
+saved_argv = sys.argv
+sys.argv = [helper, "replace", root, "windows-fail-closed-probe.txt"]
+error = io.StringIO()
+try:
+    with contextlib.redirect_stderr(error):
+        result = module.main()
+finally:
+    sys.argv = saved_argv
+if result != 1 or "fail-closed" not in error.getvalue():
+    raise SystemExit("no-descriptor operation did not report fail-closed")
+if pathlib.Path(root, "windows-fail-closed-probe.txt").exists():
+    raise SystemExit("no-descriptor operation wrote a file")
+PY
+
+# Project settings must not silently authorize repository-controlled execution.
+risky_permissions=$("$test_python" -I - "$repo_root/.claude/settings.json" <<'PY'
+import json
+import sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    settings = json.load(handle)
+for item in settings.get("permissions", {}).get("allow", []):
+    if item.startswith("Bash("):
+        print(item)
+PY
+)
+[ -z "$risky_permissions" ] || fail "committed Bash auto-allow remains: $risky_permissions"
+if grep -F '"Bash(git *)"' "$repo_root/.claude/docs/settings-local-template.md" >/dev/null \
+    || grep -F '"Bash(npm *)"' "$repo_root/.claude/docs/settings-local-template.md" >/dev/null; then
+  fail "local settings template recommends a wildcarded execution grant"
+fi
+
+# Agent selection is checked at the tool boundary, not trusted from project YAML.
+allowed_agent='{"tool_input":{"subagent_type":"qa-tester"}}'
+if ! (cd "$project" && printf '%s\n' "$allowed_agent" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-agent.sh); then
+  fail "reviewed agent type was rejected"
+fi
+unknown_agent='{"tool_input":{"subagent_type":"repo-injected-agent"}}'
+if (cd "$project" && printf '%s\n' "$unknown_agent" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-agent.sh >/dev/null 2>&1); then
+  fail "unreviewed agent type was accepted"
+fi
+
+# The helper root comes from the running script, never caller or event cwd.
+spoof_root="$test_root/spoof-project"
+mkdir -p "$spoof_root/.claude/hooks"
+export CCGS_SPOOF_MARKER="$test_root/spoof-helper-executed"
+printf '%s\n' '#!/bin/sh' 'touch "$CCGS_SPOOF_MARKER"' > "$spoof_root/.claude/hooks/yaml-helper.sh"
+spoof_status=$(printf '{"model":{"display_name":"test"},"workspace":{"current_dir":"%s"}}\n' "$spoof_root")
+if ! (cd "$spoof_root" && printf '%s\n' "$spoof_status" | CLAUDE_PROJECT_DIR="$project" bash "$project/.claude/statusline.sh" >/dev/null); then
+  fail "status line failed when event cwd differed from its trusted root"
+fi
+[ ! -e "$CCGS_SPOOF_MARKER" ] || fail "status line sourced an event-selected helper"
+
+if (cd "$project" && CLAUDE_PROJECT_DIR="$spoof_root" bash .claude/scripts/project-coherence.sh >/dev/null 2>&1); then
+  fail "project coherence accepted an ambient root that differs from its script root"
+fi
+
+if [ "$test_os" = "nt" ]; then
+  if default_writer=$(
+    cd "$spoof_root" || exit 1
+    unset CCGS_ROOT
+    . "$project/.claude/hooks/path-security.sh"
+    printf '%s\n' anchored | ccgs_safe_replace production/session-logs/default-root-probe.log 2>&1
+  ); then
+    fail "secure writer did not fail closed without handle-relative traversal"
+  fi
+  assert_contains "$default_writer" "fail-closed" "Windows secure writer did not explain its fail-closed boundary"
+else
+  default_writer=$(
+    cd "$spoof_root" || exit 1
+    unset CCGS_ROOT
+    . "$project/.claude/hooks/path-security.sh"
+    printf '%s\n' anchored | ccgs_safe_replace production/session-logs/default-root-probe.log
+    ccgs_safe_read production/session-logs/default-root-probe.log
+  ) || fail "path-security default root could not be authenticated"
+  [ "$default_writer" = "anchored" ] || fail "path-security default root did not follow its own script"
+fi
+[ ! -e "$spoof_root/production/session-logs/default-root-probe.log" ] \
+  || fail "path-security defaulted to the caller working directory"
+
+# Safety categories are an immutable baseline and specialist values are typed.
+cat >> "$project/project.yaml" <<EOF
+modes:
+  automation_always_ask: [unknown_only]
+commands: # typed argv profiles
+  test: ["$test_python", "-I", "-c", "import os; assert 'CCGS_SHOULD_NOT_LEAK' not in os.environ; open('typed-command-ran', 'w').write('ok')"]
+EOF
+if ! (
+  cd "$project" || exit 1
+  CLAUDE_PROJECT_DIR="$project"
+  . .claude/hooks/yaml-helper.sh
+  is_always_ask_category scope_changes \
+    && is_always_ask_category command_execution \
+    && ! is_always_ask_category unknown_only \
+    && validate_enum_value specialists.code godot-gdscript-specialist \
+    && ! validate_enum_value specialists.code repo-injected-agent >/dev/null 2>&1
+); then
+  fail "immutable automation defaults or specialist validation failed"
+fi
+
+# Typed command profiles do nothing during inspection, reject stale approval,
+# and execute the exact approved argv without a shell.
+export CCGS_SHOULD_NOT_LEAK="repository commands must not inherit this value"
+CCGS_COMMAND_MARKER="$project/typed-command-ran"
+command_inspection=$(cd "$project" && "$test_python" -I .claude/scripts/run-project-command.py inspect test) \
+  || fail "typed command inspection failed"
+[ ! -e "$CCGS_COMMAND_MARKER" ] || fail "command inspection executed the profile"
+command_sha=$(printf '%s\n' "$command_inspection" | sed -n 's/^APPROVAL_SHA=//p')
+[ -n "$command_sha" ] || fail "typed command inspection emitted no approval SHA"
+if (cd "$project" && "$test_python" -I .claude/scripts/run-project-command.py run test --approved-sha deadbeef >/dev/null 2>&1); then
+  fail "typed command runner accepted stale approval"
+fi
+(cd "$project" && "$test_python" -I .claude/scripts/run-project-command.py run test --approved-sha "$command_sha") \
+  || fail "typed command runner rejected the exact approved argv"
+[ -f "$CCGS_COMMAND_MARKER" ] || fail "typed command runner did not execute the approved argv"
 
 # YAML parsing must not import a repository-local standard-library shadow.
 export CCGS_TEST_MARKER="$test_root/re-imported"
@@ -78,6 +213,25 @@ if ! artifact_output=$(cd "$project" && bash .claude/scripts/artifact-check.sh -
   fail "artifact scanner did not complete: $artifact_output"
 fi
 [ ! -e "$CCGS_GLOB_MARKER" ] || fail "artifact scanner imported repository glob.py"
+
+catalog_project="$test_root/catalog-project"
+mkdir -p "$catalog_project"
+cp -R "$repo_root/.claude" "$catalog_project/.claude"
+"$test_python" -I - "$catalog_project/.claude/docs/workflow-catalog.yaml" <<'PY'
+import sys
+path = sys.argv[1]
+with open(path, encoding="utf-8") as handle:
+    body = handle.read()
+old = 'glob: "design/gdd/game-concept.md"'
+if old not in body:
+    raise SystemExit("catalog fixture target missing")
+with open(path, "w", encoding="utf-8", newline="\n") as handle:
+    handle.write(body.replace(old, 'glob: "../../outside.md"', 1))
+PY
+if catalog_escape=$(cd "$catalog_project" && bash .claude/scripts/artifact-check.sh --phase concept "$catalog_project" 2>&1); then
+  fail "artifact scanner accepted a traversal glob"
+fi
+assert_contains "$catalog_escape" "INVALID" "artifact scanner did not identify the unsafe catalog path"
 
 # Both JSON hooks must ignore a repository-local json package.
 mkdir -p "$project/json" "$project/assets/data"
@@ -114,6 +268,112 @@ else
 fi
 [ "$commit_rc" -eq 2 ] || fail "commit hook did not block invalid staged JSON: $commit_output"
 [ ! -e "$CCGS_JSON_MARKER" ] || fail "commit hook imported repository json package"
+
+commit_wrapped='{"tool_name":"Bash","tool_input":{"command":"command env CCGS_TEST=1 git -C . commit -F .git/CCGS_COMMIT_MSG"}}'
+if (cd "$project" && printf '%s\n' "$commit_wrapped" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "wrapped Git commit bypassed validation"
+fi
+git -C "$project" config alias.ci commit
+alias_commit='{"tool_name":"Bash","tool_input":{"command":"git ci -F .git/CCGS_COMMIT_MSG"}}'
+if (cd "$project" && printf '%s\n' "$alias_commit" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "Git commit alias bypassed validation"
+fi
+runtime_alias='{"tool_name":"Bash","tool_input":{"command":"git -c alias.ci=commit ci -F .git/CCGS_COMMIT_MSG"}}'
+if (cd "$project" && printf '%s\n' "$runtime_alias" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "runtime Git alias bypassed commit classification"
+fi
+config_env_alias='{"tool_name":"Bash","tool_input":{"command":"ALIAS=commit git --config-env=alias.ci=ALIAS ci --dry-run"}}'
+if (cd "$project" && printf '%s\n' "$config_env_alias" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "--config-env Git alias bypassed commit classification"
+fi
+commit_tree='{"tool_name":"Bash","tool_input":{"command":"git commit-tree HEAD^{tree}"}}'
+if ! (cd "$project" && printf '%s\n' "$commit_tree" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "git commit-tree was misclassified as git commit"
+fi
+ambiguous_commit='{"tool_name":"Bash","tool_input":{"command":"sh -c '\''git commit'\''"}}'
+if (cd "$project" && printf '%s\n' "$ambiguous_commit" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "ambiguous nested Git commit was allowed"
+fi
+
+# Commit and push validation must not validate one repository and then operate
+# on another through shell cwd changes, Git context options, or alternate index
+# environment variables.
+other_repo="$test_root/other-repo"
+mkdir -p "$other_repo"
+git -C "$other_repo" init -q
+git -C "$other_repo" config alias.ci commit
+cross_cwd='{"tool_name":"Bash","tool_input":{"command":"cd ../other-repo && git commit"}}'
+if (cd "$project" && printf '%s\n' "$cross_cwd" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "shell cwd change redirected a validated commit to another repository"
+fi
+cross_context='{"tool_name":"Bash","tool_input":{"command":"git -C ../other-repo commit"}}'
+if (cd "$project" && printf '%s\n' "$cross_context" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "Git -C redirected a validated commit to another repository"
+fi
+cross_alias='{"tool_name":"Bash","tool_input":{"command":"git -C ../other-repo ci"}}'
+if (cd "$project" && printf '%s\n' "$cross_alias" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "alternate-repository Git alias bypassed commit classification"
+fi
+alternate_index='{"tool_name":"Bash","tool_input":{"command":"GIT_INDEX_FILE=.git/alternate-index git commit"}}'
+if (cd "$project" && printf '%s\n' "$alternate_index" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "alternate Git index bypassed commit validation"
+fi
+cross_status='{"tool_name":"Bash","tool_input":{"command":"git -C ../other-repo status"}}'
+if ! (cd "$project" && printf '%s\n' "$cross_status" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "non-commit Git command in another repository was falsely blocked"
+fi
+
+# Validation must follow the index blob, not whichever bytes are in the worktree.
+printf '%s\n' '{"now": "valid only in worktree"}' > "$project/assets/data/bad.json"
+if (cd "$project" && printf '%s\n' "$commit_payload" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "invalid indexed JSON was hidden by valid worktree bytes"
+fi
+git -C "$project" add -- assets/data/bad.json
+printf '%s\n' '{broken only in worktree' > "$project/assets/data/bad.json"
+if ! (cd "$project" && printf '%s\n' "$commit_payload" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "valid indexed JSON was rejected because worktree bytes differed"
+fi
+commit_all='{"tool_name":"Bash","tool_input":{"command":"git commit -a --dry-run -m probe"}}'
+if (cd "$project" && printf '%s\n' "$commit_all" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "git commit -a could add unvalidated worktree bytes after index validation"
+fi
+commit_path='{"tool_name":"Bash","tool_input":{"command":"git commit --dry-run -m probe -- assets/data/bad.json"}}'
+if (cd "$project" && printf '%s\n' "$commit_path" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "pathspec commit could add unvalidated worktree bytes after index validation"
+fi
+same_context='{"tool_name":"Bash","tool_input":{"command":"git -C . commit"}}'
+if ! (cd "$project" && printf '%s\n' "$same_context" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "Git -C pointing at the trusted repository was falsely blocked"
+fi
+
+link_blob=$(printf '%s\n' '"outside.json"' | git -C "$project" hash-object -w --stdin)
+git -C "$project" update-index --add --cacheinfo "120000,$link_blob,assets/data/link.json"
+if (cd "$project" && printf '%s\n' "$commit_payload" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-commit.sh >/dev/null 2>&1); then
+  fail "non-regular staged JSON target was accepted"
+fi
+git -C "$project" reset -q -- assets/data/link.json
+
+push_payload='{"tool_name":"Bash","tool_input":{"command":"git -C . push origin HEAD:refs/heads/main"}}'
+push_output=$(cd "$project" && printf '%s\n' "$push_payload" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-push.sh 2>&1) \
+  || fail "full protected refspec could not be classified"
+assert_contains "$push_output" "main" "full protected refspec produced no warning"
+git -C "$project" config alias.ship 'push origin HEAD:refs/heads/main'
+alias_push='{"tool_name":"Bash","tool_input":{"command":"git ship"}}'
+alias_push_output=$(cd "$project" && printf '%s\n' "$alias_push" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-push.sh 2>&1) \
+  || fail "Git push alias could not be classified"
+assert_contains "$alias_push_output" "main" "Git push alias produced no protected-branch warning"
+config_env_push='{"tool_name":"Bash","tool_input":{"command":"ALIAS=push git --config-env=alias.ship=ALIAS ship --dry-run origin"}}'
+if (cd "$project" && printf '%s\n' "$config_env_push" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-push.sh >/dev/null 2>&1); then
+  fail "--config-env Git alias bypassed push classification"
+fi
+configured_push='{"tool_name":"Bash","tool_input":{"command":"git -c remote.origin.push=HEAD:refs/heads/main push --dry-run origin"}}'
+configured_push_output=$(cd "$project" && printf '%s\n' "$configured_push" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-push.sh 2>&1) \
+  || fail "configured push refspec could not be classified"
+assert_contains "$configured_push_output" "main" "configured push refspec produced no protected-branch warning"
+cross_push='{"tool_name":"Bash","tool_input":{"command":"git -C ../other-repo push origin HEAD:refs/heads/main"}}'
+if (cd "$project" && printf '%s\n' "$cross_push" | CLAUDE_PROJECT_DIR="$project" bash .claude/hooks/validate-push.sh >/dev/null 2>&1); then
+  fail "Git -C redirected a validated push to another repository"
+fi
 
 # The staged GDD scan is a separate Python invocation. It must use the same
 # isolated boundary and therefore must not import repository sitecustomize.py.
@@ -451,6 +711,107 @@ if create_native_link "$test_root/secret.txt" "$project/production/session-state
 else
   printf 'SKIP: native interpreter did not permit hard-link regression check\n'
 fi
+
+# Automatic writers must preserve ordinary behavior and reject redirected leaf
+# and parent paths without changing the outside target.
+safe_root=$(cd "$project" && pwd -P)
+if [ "$test_os" = "nt" ]; then
+  if writer_value=$(printf '%s\n' replacement \
+      | "$test_python" -I "$project/.claude/hooks/secure-file.py" replace "$safe_root" production/session-logs/writer-probe.log 2>&1); then
+    fail "native Windows secure writer used a path-based fallback"
+  fi
+  assert_contains "$writer_value" "fail-closed" "native Windows writer did not report its security boundary"
+  [ ! -e "$project/production/session-logs/writer-probe.log" ] \
+    || fail "fail-closed Windows writer created an output file"
+else
+  writer_value=$(
+    cd "$project" || exit 1
+    CCGS_ROOT="$safe_root"
+    . .claude/hooks/path-security.sh
+    printf '%s\n' first | ccgs_safe_append production/session-logs/writer-probe.log
+    printf '%s\n' replacement | ccgs_safe_replace production/session-logs/writer-probe.log
+    ccgs_safe_read production/session-logs/writer-probe.log
+  ) || fail "regular secure writer operations failed"
+  [ "$writer_value" = "replacement" ] || fail "secure writer did not preserve replacement bytes"
+
+  concurrent_log="production/session-logs/concurrent-writer-probe.log"
+  writer_pids=""
+  writer_index=1
+  while [ "$writer_index" -le 40 ]; do
+    (
+      printf 'entry-%s\n' "$writer_index" \
+        | "$test_python" -I "$project/.claude/hooks/secure-file.py" append "$safe_root" "$concurrent_log"
+    ) &
+    writer_pids="$writer_pids $!"
+    writer_index=$((writer_index + 1))
+  done
+  for writer_pid in $writer_pids; do
+    wait "$writer_pid" || fail "concurrent secure writer process failed"
+  done
+  concurrent_value=$("$test_python" -I "$project/.claude/hooks/secure-file.py" read "$safe_root" "$concurrent_log") \
+    || fail "concurrent secure writer output could not be read"
+  concurrent_count=$(printf '%s\n' "$concurrent_value" | grep -c '^entry-[0-9][0-9]*$')
+  unique_count=$(printf '%s\n' "$concurrent_value" | sort -u | grep -c '^entry-[0-9][0-9]*$')
+  [ "$concurrent_count" -eq 40 ] && [ "$unique_count" -eq 40 ] \
+    || fail "concurrent secure appends lost or duplicated audit records"
+fi
+
+outside_writer="$test_root/outside-writer.txt"
+printf '%s\n' 'outside sentinel' > "$outside_writer"
+rm -f -- "$project/production/session-logs/writer-probe.log"
+if create_native_link "$outside_writer" "$project/production/session-logs/writer-probe.log" file 2>/dev/null; then
+  if (
+    cd "$project" || exit 1
+    CCGS_ROOT="$safe_root"
+    . .claude/hooks/path-security.sh
+    printf '%s\n' attacker | ccgs_safe_append production/session-logs/writer-probe.log >/dev/null 2>&1
+  ); then
+    fail "secure writer followed a symlinked target"
+  fi
+  [ "$(cat "$outside_writer")" = "outside sentinel" ] || fail "symlinked writer target was modified"
+  remove_native_link "$project/production/session-logs/writer-probe.log" file \
+    || fail "writer symlink fixture cleanup failed"
+else
+  printf 'SKIP: native interpreter did not permit writer-symlink regression check\n'
+fi
+
+mkdir -p "$test_root/outside-log-parent"
+if create_native_link "$test_root/outside-log-parent" "$project/production/redirected-logs" directory 2>/dev/null; then
+  if (
+    cd "$project" || exit 1
+    CCGS_ROOT="$safe_root"
+    . .claude/hooks/path-security.sh
+    printf '%s\n' attacker | ccgs_safe_append production/redirected-logs/probe.log >/dev/null 2>&1
+  ); then
+    fail "secure writer followed a symlinked parent"
+  fi
+  [ ! -e "$test_root/outside-log-parent/probe.log" ] || fail "redirected parent received writer output"
+  remove_native_link "$project/production/redirected-logs" directory \
+    || fail "writer parent-symlink fixture cleanup failed"
+else
+  printf 'SKIP: native interpreter did not permit writer parent-symlink check\n'
+fi
+
+# A catalog artifact may not be a link to content outside the project root.
+cp "$repo_root/.claude/docs/workflow-catalog.yaml" "$catalog_project/.claude/docs/workflow-catalog.yaml"
+mkdir -p "$catalog_project/design/gdd"
+if create_native_link "$test_root/secret.txt" "$catalog_project/design/gdd/game-concept.md" file 2>/dev/null; then
+  if linked_catalog=$(cd "$catalog_project" && bash .claude/scripts/artifact-check.sh --phase concept "$catalog_project" 2>&1); then
+    fail "artifact scanner accepted a linked artifact target"
+  fi
+  assert_contains "$linked_catalog" "INVALID" "linked catalog target was not identified as unsafe"
+  remove_native_link "$catalog_project/design/gdd/game-concept.md" file \
+    || fail "catalog symlink fixture cleanup failed"
+else
+  printf 'SKIP: native interpreter did not permit catalog-symlink regression check\n'
+fi
+
+# Dependency labels are emitted as data rather than interpolated into sed code.
+if grep -F -- 'sed "s|^|  $(basename "$f") -> |"' "$repo_root/.claude/scripts/review-scope.sh" >/dev/null; then
+  fail "review-scope still interpolates a filename into a sed program"
+fi
+grep -F -- "printf '  %s -> %s\\n' \"\$base\" \"\$dependency\"" "$repo_root/.claude/scripts/review-scope.sh" >/dev/null \
+  || fail "review-scope lost data-only dependency formatting"
 
 # The skill fixes must preserve literal paths, linked worktrees, and truthful CI text.
 grep -F -- 'git --literal-pathspecs add --' "$repo_root/.claude/skills/story-done/SKILL.md" >/dev/null \

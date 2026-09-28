@@ -23,9 +23,15 @@ engine has a native way.
 ## The procedure
 
 1. **Launch windowed** at a fixed resolution — `1280x720` unless the project
-   says otherwise — using `commands.run` from `project.yaml`. Never the
-   headless / batch / null-RHI flag: those exist to *skip* rendering.
-2. **Launch straight into the scene or map the story touched.** A feature that
+   says otherwise — using the typed `commands.run` argv array. Inspect it with
+   `python -I .claude/scripts/run-project-command.py inspect run`, present the
+   exact argv and SHA for `command_execution` approval, then pass that SHA to
+   the dispatcher's `run` action. Never evaluate the YAML as shell source.
+   Legacy scalar commands are untrusted. Never use the headless / batch /
+   null-RHI flag here: those exist to *skip* rendering.
+2. **Launch straight into the scene or map the story touched.** Supply any
+   scene or map additions as a JSON argv list with `--extra-json` on both the
+   inspect and run calls so the approval SHA covers them. A feature that
    is only reachable through the main menu and three clicks is a feature the
    run will not reach. Stories should be written so their surface is reachable
    from a launch argument (a scene path, a map URL, a `--scene` flag).

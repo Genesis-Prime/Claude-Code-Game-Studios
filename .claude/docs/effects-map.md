@@ -941,7 +941,7 @@ appends to the existing log.
 
 **Controls:** Decision categories that ALWAYS trigger AskUserQuestion regardless of automation mode
 **Values:** list of category names
-**Default:** `[scope_changes, file_deletions, schema_changes]`
+**Immutable baseline:** `[scope_changes, file_deletions, schema_changes, command_execution]`
 **Set by:** `/start`, `/settings`
 **Read by:** All skills that respect `modes.automation`
 
@@ -1738,11 +1738,11 @@ implementation, review, and architecture validation
 > look at it. The per-skill table at the bottom is now current behaviour, not
 > intent. `validate-push.sh` was once named as a reader and never was.
 
-**Controls:** Explicit shell commands to build, test, run, and smoke-test the project
-**Values:** strings — shell-executable commands
+**Controls:** Explicit process argument arrays to build, test, run, and smoke-test the project
+**Values:** one-line JSON-style arrays of strings, executed without a shell
 **Default:** `[UNSET]` — populated by `/setup-engine` with engine-typical defaults
-**Set by:** `/setup-engine`, `/settings`
-**Written by:** `/setup-engine`, `/settings`. **Read by:** `test` — `/dev-story` (Phase 6 parse check), `/smoke-check`, `project-coherence.sh`; `smoke` — `/dev-story`; `build` — `/smoke-check`, `project-coherence.sh`; `run` — `/dev-story` (Phase 6 step 4, the run-and-observe step). `/launch-checklist` and `/regression-suite` name these commands but cannot execute them — their `allowed-tools` has no `Bash`.
+**Set by:** `/setup-engine` or an explicitly reviewed manual array edit
+**Written by:** `/setup-engine`. `/settings` refuses scalar command writes. **Read by:** `test` — `/dev-story` (Phase 6 parse check), `/smoke-check`, `project-coherence.sh`; `smoke` — `/dev-story`; `build` — `/smoke-check`, `project-coherence.sh`; `run` — `/dev-story` (Phase 6 step 4, the run-and-observe step). `/launch-checklist` and `/regression-suite` name these commands but cannot execute them — their `allowed-tools` has no `Bash`.
   *(Derived by grep. A helper-based read would not show up, so treat this list as the verified floor, not a ceiling.)*
 
 **Priority chain:** `commands.*` in `project.yaml` → engine-typical default → no command available
@@ -1756,44 +1756,38 @@ implementation, review, and architecture validation
 
 ### Fields
 
-Each command can be a simple string (used on all OSes) or an OS-aware map:
+Each command is one process argv array. Shell command strings and OS-aware shell
+maps are rejected. Projects that need per-OS commands should choose the array at
+setup time or keep separate reviewed config revisions.
 
-**Simple form** (one command, used on every OS):
 ```yaml
 commands:
-  build: "godot --headless --export-debug '<PRESET>'"   # ask; see the note below
-  test:  "godot --headless --script tests/gdunit4_runner.gd"
-  run:   "godot --path . --windowed --resolution 1280x720"
-  smoke: "godot --headless --quit-after 5"
+  build: ["godot", "--headless", "--export-debug", "<PRESET>"]
+  test:  ["godot", "--headless", "--script", "tests/gdunit4_runner.gd"]
+  run:   ["godot", "--path", ".", "--windowed", "--resolution", "1280x720"]
+  smoke: ["godot", "--headless", "--quit-after", "5"]
 ```
 
-Note that `build` is the one row the simple form suits least: an export preset
-names a *platform*, so a single build string is portable only for a project that
-builds one platform. The other three rows are genuinely OS-independent.
+Before execution, inspect the exact argv and approval hash:
 
-**OS-aware form** (different commands per OS):
-```yaml
-commands:
-  build:
-    default: "godot --headless --export-debug 'Linux/X11'"
-    windows: "godot.exe --headless --export-debug 'Windows Desktop'"
-    macos:   "godot --headless --export-debug 'macOS'"
-  test:
-    default: "godot --headless --script tests/gdunit4_runner.gd"
-  run:
-    default: "godot --path . --windowed --resolution 1280x720"
-  smoke:
-    default: "godot --headless --quit-after 5"
+```bash
+python -I .claude/scripts/run-project-command.py inspect test
 ```
 
-**Resolution rule:** if the value is a string, use it as-is on any OS. If the
-value is a map, skills/hooks read the current OS and pick the matching key
-(`linux`, `windows`, `macos`). Fall back to `default` if no OS-specific key
-matches.
+After the operator approves that exact receipt, run it with the returned SHA:
 
-This solves the Windows/Linux/macOS path-and-binary-name differences without
-breaking the whitelist (commands stays locked to project.yaml — the OS-specific
-keys are inside the locked file, not a local override).
+```bash
+python -I .claude/scripts/run-project-command.py run test --approved-sha <sha>
+```
+
+The dispatcher anchors to its own repository, reads a bounded regular
+`project.yaml`, rejects linked config, resolves and records the executable,
+executes with `shell=False`, passes only an allowlisted runtime environment,
+caps output and time, and invalidates approval when the executable identity,
+environment, config, timeout, or extra argv changes.
+
+Legacy scalar values are untrusted and are not executed. Re-run `/setup-engine`
+or replace them with reviewed argv arrays.
 
 | Field | Purpose |
 |-------|---------|
@@ -1814,8 +1808,8 @@ engine reference in this repo can source it. See `/setup-engine` §"The Godot
 
 | Engine | build | test | run | smoke |
 |--------|-------|------|-----|-------|
-| Godot | `godot --headless --export-debug '<PRESET>'` | `godot --headless --script tests/gdunit4_runner.gd` | `godot --path . --windowed --resolution 1280x720` | `godot --headless --quit-after 5` |
-| Unity | `Unity -batchmode -quit -projectPath . -buildTarget <TARGET>` | `Unity -runTests -projectPath . -testPlatform PlayMode` | `Builds/<Target>/<Game>.exe -screen-width 1280 -screen-height 720 -screen-fullscreen 0` | `Unity -batchmode -quit -projectPath . -executeMethod SmokeCheck.Run` |
+| Godot | `["godot", "--headless", "--export-debug", "<PRESET>"]` | `["godot", "--headless", "--script", "tests/gdunit4_runner.gd"]` | `["godot", "--path", ".", "--windowed", "--resolution", "1280x720"]` | `["godot", "--headless", "--quit-after", "5"]` |
+| Unity | `["Unity", "-batchmode", "-quit", "-projectPath", ".", "-buildTarget", "<TARGET>"]` | `["Unity", "-runTests", "-projectPath", ".", "-testPlatform", "PlayMode"]` | `["Builds/<Target>/<Game>.exe", "-screen-width", "1280", "-screen-height", "720", "-screen-fullscreen", "0"]` | `["Unity", "-batchmode", "-quit", "-projectPath", ".", "-executeMethod", "SmokeCheck.Run"]` |
 | Unreal | engine-specific (varies by version) | engine-specific | engine-specific | engine-specific |
 
 > **`<PRESET>` and `<TARGET>` are placeholders, not values to copy.** A Godot
@@ -1828,7 +1822,9 @@ engine reference in this repo can source it. See `/setup-engine` §"The Godot
 > `/setup-engine` usually runs before the project has any — write
 > `[TO BE CONFIGURED]` rather than guessing a name.
 
-Users override per-project as needed via `/settings commands.<field>=<value>` or by editing `project.yaml` directly.
+Users change a profile by re-running `/setup-engine` or by explicitly reviewing
+and editing the argv array in `project.yaml`; `/settings` does not accept scalar
+command values.
 
 ---
 
@@ -2397,11 +2393,11 @@ performance:
   memory_ceiling_mb: null
   enforce: warn              # warn | block | off
 
-commands:                    # simple string OR OS-aware map per command
-  build: "godot --headless --export-debug '<PRESET>'"   # your export_presets.cfg name
-  test: "godot --headless --script tests/gdunit4_runner.gd"
-  run: "godot --editor"
-  smoke: "godot --headless --quit-after 5"
+commands:                    # reviewed argv arrays; never shell source
+  build: ["godot", "--headless", "--export-debug", "<PRESET>"]
+  test: ["godot", "--headless", "--script", "tests/gdunit4_runner.gd"]
+  run: ["godot", "--path", ".", "--windowed", "--resolution", "1280x720"]
+  smoke: ["godot", "--headless", "--quit-after", "5"]
 
 features:
   session_state: on          # off | on

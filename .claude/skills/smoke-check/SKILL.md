@@ -122,8 +122,20 @@ Report findings before proceeding: "Environment: [engine]. Test directory:
 
 ## Phase 2: Run Automated Tests
 
-Attempt to run the test suite via Bash. Select the command based on the engine
-detected in Phase 1:
+Attempt to run the test suite via Bash. First inspect a typed `commands.test`
+profile with:
+
+```bash
+python -I .claude/scripts/run-project-command.py inspect test
+```
+
+If present, show the exact argv and approval SHA and ask the operator for exact
+`command_execution` approval. Run only the same receipt with
+`run test --approved-sha <sha>`. A changed SHA requires new approval. Never
+paste or evaluate `commands.*` as shell source; a legacy scalar is untrusted.
+
+If no typed profile exists, select the fixed engine command below, present its
+exact argv for `command_execution` approval, and run it only after approval:
 
 **Godot 4:**
 ```bash

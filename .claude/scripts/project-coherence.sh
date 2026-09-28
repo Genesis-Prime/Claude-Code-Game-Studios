@@ -33,8 +33,11 @@
 set -u
 export LC_ALL=C
 
-ROOT="${CLAUDE_PROJECT_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}"
-cd "$ROOT" || exit 0
+_CCGS_SCRIPT_DIR="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+[ -n "$_CCGS_SCRIPT_DIR" ] || exit 2
+. "$_CCGS_SCRIPT_DIR/../hooks/trusted-root.sh" 2>/dev/null || exit 2
+ccgs_bootstrap_trusted_root "$_CCGS_SCRIPT_DIR/../.." || exit 2
+ROOT="$CCGS_ROOT"
 
 DIFFERS=0
 CHECKED=0

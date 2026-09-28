@@ -329,8 +329,9 @@ You stay in control. The agents provide structure and expertise, not autonomy.
 
 | Hook | Trigger | What It Does |
 |------|---------|--------------|
-| `validate-commit.sh` | PreToolUse (Bash) | Checks for hardcoded values, TODO format, JSON validity, design doc sections — exits early if the command is not `git commit` |
-| `validate-push.sh` | PreToolUse (Bash) | Warns on pushes to protected branches — exits early if the command is not `git push` |
+| `validate-commit.sh` | PreToolUse (Bash) | Classifies Git invocations and validates the exact staged blobs for JSON, design, and code checks |
+| `validate-push.sh` | PreToolUse (Bash) | Recognizes wrappers and full refspecs, then warns when a push affects protected branches |
+| `validate-agent.sh` | PreToolUse (Agent/Task) | Blocks agent types outside the reviewed framework roster |
 | `validate-assets.sh` | PostToolUse (Write/Edit) | Validates naming conventions and JSON structure — exits early if the file is not in `assets/` |
 | `session-start.sh` | Session open | Shows current branch and recent commits for orientation |
 | `detect-gaps.sh` | Session open | Detects fresh projects (suggests `/start`) and missing design docs when code or prototypes exist |
@@ -344,7 +345,10 @@ You stay in control. The agents provide structure and expertise, not autonomy.
 
 > **Note**: `validate-commit.sh`, `validate-assets.sh`, and `validate-skill-change.sh` fire on every Bash/Write tool call and exit immediately (exit 0) when the command or file path is not relevant. This is normal hook behavior — not a performance concern.
 
-**Permission rules** in `settings.json` auto-allow safe operations (git status, test runs) and block dangerous ones (force push, `rm -rf`, reading `.env` files).
+**Permission rules** in `settings.json` leave shell commands under normal
+approval and additionally deny known destructive operations such as force push,
+`rm -rf`, and reading `.env` files. Read-only-looking Git and test commands can
+still invoke repository-controlled helpers or code, so they are not auto-allowed.
 
 ### Path-Scoped Rules
 
@@ -391,7 +395,15 @@ This is a **template**, not a locked framework. Everything is meant to be custom
 
 ## Platform Support
 
-Primary development and testing on **Windows 10** with Git Bash. All hooks use POSIX-compatible patterns (`grep -E`, not `grep -P`) and include fallbacks for missing tools, so they should run on macOS and Linux. The `notify.sh` hook uses PowerShell for Windows toast notifications and is a no-op elsewhere — desktop notifications on macOS/Linux are not yet wired. Cross-platform testing is ongoing; please file issues for any platform-specific breakage.
+Primary development and testing on **Windows 10** with Git Bash. Hooks use
+POSIX-compatible patterns (`grep -E`, not `grep -P`) and include fallbacks for
+missing optional tools. Security-sensitive session and audit file updates need
+handle-relative filesystem traversal. Native Windows Python does not expose
+that primitive, so those writes fail closed with a diagnostic instead of using
+a junction-race-prone path fallback; validation and the checkpoint reader still
+run. The `notify.sh` hook uses PowerShell for Windows toast notifications and is
+a no-op elsewhere. Cross-platform testing is ongoing; please file issues for
+any platform-specific breakage.
 
 ## Community
 

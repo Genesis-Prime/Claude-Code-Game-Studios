@@ -1,34 +1,11 @@
 #!/bin/bash
 
-# --- work from the project root ----------------------------------------------
-# Every path below is repo-relative, so a hook invoked with a working directory
-# that is not the repo root would silently read and write the WRONG TREE --
-# returning a near-empty result instead of the session-recovery block, and
-# creating stray trees such as docs/production/session-logs/ on write.
-#
-# PRECEDENCE IS LOAD-BEARING. A cwd that IS a project root carries real
-# information and must win: a caller sitting inside another project means that
-# project, not this one. Resolving to the script's own location first would
-# override them. So, in order:
-#   1. cwd holds project.yaml   -> cwd   (a project root)
-#   2. cwd holds .claude/       -> cwd   (a project root not yet configured)
-#   3. CLAUDE_PROJECT_DIR       -> that  (populated in the hook environment)
-#   4. this script's location   -> <root>/.claude/hooks/../.. by construction
-# Rule 4 always works and needs no environment at all; rules 1-2 stop it from
-# overriding a caller that legitimately means somewhere else.
-#
-# NOT an upward search: that resolves a nested project to its parent's config.
-if [ -f "project.yaml" ] || [ -d ".claude" ]; then
-  CCGS_ROOT="$PWD"
-elif [ -n "${CLAUDE_PROJECT_DIR:-}" ] && [ -d "${CLAUDE_PROJECT_DIR}" ]; then
-  CCGS_ROOT="$CLAUDE_PROJECT_DIR"
-else
-  CCGS_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
-fi
-[ -n "$CCGS_ROOT" ] && cd "$CCGS_ROOT" 2>/dev/null || true
-if [ -f .claude/hooks/path-security.sh ]; then
-    . .claude/hooks/path-security.sh
-fi
+# Resolve every executable and data path from this hook's own repository.
+_CCGS_HOOK_DIR="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)"
+[ -n "$_CCGS_HOOK_DIR" ] || exit 0
+. "$_CCGS_HOOK_DIR/trusted-root.sh" 2>/dev/null || exit 0
+ccgs_bootstrap_trusted_root "$_CCGS_HOOK_DIR/../.." || exit 0
+. "$_CCGS_HOOK_DIR/path-security.sh" 2>/dev/null || exit 0
 
 # Claude Code PreCompact hook: Dump session state before context compression
 # This output appears in the conversation right before compaction, ensuring
@@ -36,8 +13,8 @@ fi
 
 # features.session_state: off => this hook is a no-op. Default `on`; see
 # session_state_enabled() in yaml-helper.sh.
-if [ -f .claude/hooks/yaml-helper.sh ]; then
-    . .claude/hooks/yaml-helper.sh
+if [ -f "$_CCGS_HOOK_DIR/yaml-helper.sh" ]; then
+    . "$_CCGS_HOOK_DIR/yaml-helper.sh"
     session_state_enabled || exit 0
 fi
 
@@ -174,10 +151,9 @@ if [ "$WIP_FOUND" = false ]; then
 fi
 
 # --- Log compaction event ---
-SESSION_LOG_DIR="production/session-logs"
-mkdir -p "$SESSION_LOG_DIR" 2>/dev/null
-echo "Context compaction occurred at $(date)." \
-    >> "$SESSION_LOG_DIR/compaction-log.txt" 2>/dev/null
+printf 'Context compaction occurred at %s.\n' "$(date)" \
+    | ccgs_safe_append "production/session-logs/compaction-log.txt" \
+    || echo "pre-compact: secure compaction log append failed" >&2
 
 echo ""
 echo "## Recovery Instructions"

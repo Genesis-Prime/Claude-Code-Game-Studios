@@ -461,17 +461,24 @@ Before collecting anything:
 
 1. **Check the agent's own terminal state.** If it reported stopping early, hit a
    turn/step limit, or its report ends mid-task, treat the story as **INCOMPLETE**.
-2. **Verify the output parses.** Run the cheapest check the engine offers —
-   `commands.test` or `commands.smoke` from `project.yaml`, or for Godot
-   `godot --headless --path . --import`, which surfaces parse errors without
-   running the game. Report what you ran and what it said.
+2. **Verify the output parses.** Prefer the typed `commands.test` or
+   `commands.smoke` argv array from `project.yaml`. Never paste or evaluate a
+   config value as shell source. Run
+   `python -I .claude/scripts/run-project-command.py inspect <test|smoke>`, show
+   the exact argv and SHA, and ask for exact approval under the immutable
+   `command_execution` category. Only then run the matching
+   `python -I .claude/scripts/run-project-command.py run <name> --approved-sha
+   <sha>`. A changed SHA requires new approval. Legacy scalar commands are
+   untrusted and remain `NOT VERIFIED` until `/setup-engine` converts them.
+   Report what ran and what it said.
 3. If the engine binary is unavailable, write **`parse NOT VERIFIED — engine
    binary not available`**. Do not infer that the code is fine because it reads
    correctly; that inference is exactly what this step exists to replace.
 4. **Run it and look.** A parse check is not a run. For every story that
    changes something a player can see — every Visual/Feel and UI story, and any
    Logic, Integration or Config/Data story with a surface — launch the build
-   via `commands.run`, straight into the scene or map the story touched, and
+   via the typed `commands.run` profile and the same inspect/approve/run
+   sequence, straight into the scene or map the story touched, and
    retain a screenshot under `production/qa/evidence/[story-slug]/`. Then
    `Read` the image and compare it to the acceptance criteria: clipped text,
    an overflowing panel, a missing element are defects, and this is the only

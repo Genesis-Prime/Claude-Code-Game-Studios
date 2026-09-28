@@ -601,12 +601,14 @@ naming:
   scenes: <value>
 ```
 
-**`commands` block** — engine-default shell commands, simple-string form:
+**`commands` block** — engine-default argument arrays. Each item is one process
+argument. Never store shell source, redirections, pipelines, substitutions, or
+quoting syntax in these values.
 
 | Engine | `build` | `test` | `run` | `smoke` |
 |--------|---------|--------|-------|---------|
-| Godot | `godot --headless --export-debug '<PRESET>'` **(ASK — do not default)** | `godot --headless --script tests/gdunit4_runner.gd` | `godot --path . --windowed --resolution 1280x720` | `godot --headless --quit-after 5` |
-| Unity | `Unity -batchmode -quit -projectPath . -buildTarget <TARGET>` **(ASK — do not default)** | `Unity -runTests -projectPath . -testPlatform PlayMode` | `Builds/<Target>/<Game>.exe -screen-width 1280 -screen-height 720 -screen-fullscreen 0` | `Unity -batchmode -quit -projectPath . -executeMethod SmokeCheck.Run` |
+| Godot | `["godot", "--headless", "--export-debug", "<PRESET>"]` **(ASK — do not default)** | `["godot", "--headless", "--script", "tests/gdunit4_runner.gd"]` | `["godot", "--path", ".", "--windowed", "--resolution", "1280x720"]` | `["godot", "--headless", "--quit-after", "5"]` |
+| Unity | `["Unity", "-batchmode", "-quit", "-projectPath", ".", "-buildTarget", "<TARGET>"]` **(ASK — do not default)** | `["Unity", "-runTests", "-projectPath", ".", "-testPlatform", "PlayMode"]` | `["Builds/<Target>/<Game>.exe", "-screen-width", "1280", "-screen-height", "720", "-screen-fullscreen", "0"]` | `["Unity", "-batchmode", "-quit", "-projectPath", ".", "-executeMethod", "SmokeCheck.Run"]` |
 
 > **`commands.run` is the one the run-and-observe step depends on.** It must
 > launch the **game**, windowed, at a fixed resolution — never the editor, and
@@ -615,35 +617,24 @@ naming:
 > (`.claude/docs/run-and-observe.md`). `test` and `smoke` feed the parse check
 > and `/smoke-check`; `build` is the one row you must ask for.
 
-> **YAML quoting rule — applies to EVERY command value.** `yaml-helper.sh` — the
-> parser every config read in this framework goes through — decodes **no**
-> escape sequences: neither `\"` inside a double-quoted scalar nor `''` inside a
-> single-quoted scalar. It takes the first matching quote character as the end of
-> the value and discards the rest, so `"he said \"hi\" now"` parses as
-> `he said \`. Verified against the parser, not inferred. The rule is
-> preventative here — it applies the moment anything does read `commands.*`, and
-> to every other quoted value in `project.yaml` today.
-> Pick the quote style that needs **no escaping**:
-> - value contains a single quote `'` (e.g. the Godot `build` above) → wrap it in
->   a **double-quoted** YAML scalar: `"... 'Linux/X11' ..."`
-> - value contains a double quote `"` (e.g. the Unreal `test`/`smoke` below) →
->   wrap it in a **single-quoted** YAML scalar: `'... "Quit" ...'`
-> - value contains neither → use a double-quoted scalar for consistency.
-> Never use a quote style that forces an escape (`\"` or `''`) — the parser
-> truncates the value at the escape. A value containing BOTH quote types cannot
-> be represented for this parser; rewrite the command to drop one.
+> **Array rule — applies to EVERY command value.** Use a one-line JSON-style
+> array of double-quoted strings. `.claude/scripts/run-project-command.py`
+> rejects scalars, nested values, duplicate command keys, control characters,
+> and malformed arrays. It executes the validated array with `shell=False` from
+> the authenticated project root. The operator must inspect the exact argv and
+> approve its SHA before every run; a config or argument change invalidates that
+> approval.
 
 **Godot / Unity** — write the table values directly, substituting the operator's
-answer for `<PRESET>` / `<TARGET>`. Godot's `build` contains a single quote, so it
-takes a double-quoted scalar (`Windows Desktop` below is the *example* answer, not
-a default — write what the operator said):
+answer for `<PRESET>` / `<TARGET>`. `Windows Desktop` below is the *example*
+answer, not a default; write the exact answer as one array item:
 
 ```yaml
 commands:
-  build: "godot --headless --export-debug 'Windows Desktop'"
-  test: "godot --headless --script tests/gdunit4_runner.gd"
-  run: "godot --path . --windowed --resolution 1280x720"
-  smoke: "godot --headless --quit-after 5"
+  build: ["godot", "--headless", "--export-debug", "Windows Desktop"]
+  test: ["godot", "--headless", "--script", "tests/gdunit4_runner.gd"]
+  run: ["godot", "--path", ".", "--windowed", "--resolution", "1280x720"]
+  smoke: ["godot", "--headless", "--quit-after", "5"]
 ```
 
 > **Also write `engine.path` if the editor is not on `PATH`.** These commands name
@@ -661,18 +652,20 @@ commands:
 > installed. Nothing in the project told it where to look, so absence of a path read
 > as absence of an engine.
 
-For **Unreal**, UE build/test commands vary by version and project setup. Write
-best-effort values and add a `# TODO` comment so the user knows to confirm them.
-The `test`/`smoke` commands embed double quotes, so they take single-quoted
-scalars:
+For **Unreal**, first glob only `*.uproject` at the project root. Continue only
+when exactly one regular project file exists. Use that exact filename as one
+argv item. Never derive it from the repository directory. Ask for the automation
+namespace and accept only `^[A-Za-z][A-Za-z0-9_]*$`; otherwise leave `test`
+unconfigured. UE build/test arguments vary by version and project setup, so add
+a `# TODO` comment for confirmation.
 
 ```yaml
 commands:
-  # TODO: confirm these for your UE version and project — adjust via /settings
-  build: 'RunUAT.bat BuildCookRun -project=<project>.uproject -platform=Win64 -build -cook'
-  test: 'UnrealEditor-Cmd.exe <project>.uproject -ExecCmds="Automation RunTests <project>; Quit" -unattended -nullrhi'
-  run: 'UnrealEditor.exe <project>.uproject -game -windowed -ResX=1280 -ResY=720'
-  smoke: 'UnrealEditor-Cmd.exe <project>.uproject -game -nullrhi -unattended -ExecCmds="Quit"'
+  # TODO: confirm these for your UE version and project; edit the reviewed arrays if needed
+  build: ["RunUAT.bat", "BuildCookRun", "-project=<exact-file>.uproject", "-platform=Win64", "-build", "-cook"]
+  test: ["UnrealEditor-Cmd.exe", "<exact-file>.uproject", "-ExecCmds=Automation RunTests <namespace>; Quit", "-unattended", "-nullrhi"]
+  run: ["UnrealEditor.exe", "<exact-file>.uproject", "-game", "-windowed", "-ResX=1280", "-ResY=720"]
+  smoke: ["UnrealEditor-Cmd.exe", "<exact-file>.uproject", "-game", "-nullrhi", "-unattended", "-ExecCmds=Quit"]
 ```
 
 **Two details are load-bearing.** `smoke` needs `-game`: without it
@@ -728,10 +721,10 @@ Wait for confirmation, then apply based on the file's current state:
     scenes: <...>
 
   commands:
-    build: "<...>"
-    test: "<...>"
-    run: "<...>"
-    smoke: "<...>"
+    build: ["<executable>", "<arg>"]
+    test: ["<executable>", "<arg>"]
+    run: ["<executable>", "<arg>"]
+    smoke: ["<executable>", "<arg>"]
   ```
 
   Do not seed `modes.review_mode` here. It is a rigor-fronted knob — `modes.rigor`
@@ -1024,8 +1017,9 @@ bash .claude/scripts/project-coherence.sh
 ```
 
 It compares `project.yaml` against `docs/engine-reference/<engine>/VERSION.md`,
-against `project.godot`, and against the engine binary actually on PATH, and it
-checks that the files `commands.build` and `commands.test` name exist.
+against `project.godot`, and against the engine binary actually on PATH. It also
+checks that file arguments named by the typed `commands.build` and
+`commands.test` profiles exist.
 
 **Report every `[DIFFERS]` line to the user and resolve it before finishing.**
 Each one means two files this skill just wrote disagree, or describe something

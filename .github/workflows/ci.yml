@@ -46,7 +46,7 @@ jobs:
         run: find .claude tests -type f -name '*.sh' -print0 | xargs -0 bash -n
 
       - name: Check Python syntax
-        run: python -I -c 'from pathlib import Path; p = Path(".claude/hooks/read-session-state.py"); compile(p.read_bytes(), str(p), "exec")'
+        run: python -I -c 'from pathlib import Path; files=list(Path(".claude").rglob("*.py")); [compile(p.read_bytes(), str(p), "exec") for p in files]; print(f"checked {len(files)} Python files")'
 
       - name: Run security regression suite
         run: bash tests/security-regression.sh

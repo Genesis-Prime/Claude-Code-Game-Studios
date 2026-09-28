@@ -119,6 +119,9 @@ printf '%s' "$scope" | while IFS= read -r f; do
         dep { print }
     ' "$f" | grep -oE '[A-Za-z0-9_-]+\.md' | sort -u)
     if [ -n "$deps" ]; then
-        printf '%s\n' "$deps" | sed "s|^|  $(basename "$f") -> |"
+        base=${f##*/}
+        printf '%s\n' "$deps" | while IFS= read -r dependency; do
+            [ -n "$dependency" ] && printf '  %s -> %s\n' "$base" "$dependency"
+        done
     fi
 done
