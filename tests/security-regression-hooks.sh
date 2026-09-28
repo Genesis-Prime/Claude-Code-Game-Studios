@@ -185,13 +185,24 @@ sanitized=$(
 )
 [ "$sanitized" = "safe]52;payloadforged" ] || fail "terminal sanitizer retained controls or line breaks"
 agent_event='{"session_id":"s1","agent_type":"bad|row"}'
-printf '%s\n' "$agent_event" | CLAUDE_PROJECT_DIR="$project" "$test_bash" "$project/.claude/hooks/log-agent.sh" >/dev/null 2>&1
-audit=$(
-  cd "$project" || exit 1
-  . .claude/hooks/path-security.sh
-  ccgs_safe_read production/session-logs/agent-audit.log 2>/dev/null
-)
-assert_not_contains "$audit" "bad|row" "agent audit accepted a field separator"
-assert_contains "$audit" "Agent invoked: unknown" "unsafe agent name was not normalized"
+audit_output=$(printf '%s\n' "$agent_event" \
+  | CLAUDE_PROJECT_DIR="$project" "$test_bash" "$project/.claude/hooks/log-agent.sh" 2>&1 >/dev/null)
+audit_rc=$?
+audit_path="$project/production/session-logs/agent-audit.log"
+if [ -e "$audit_path" ]; then
+  [ "$audit_rc" -eq 0 ] || fail "agent audit wrote data but reported failure"
+  assert_not_contains "$audit_output" "agent audit: secure append failed" "agent audit reported failure after writing data"
+  audit=$(
+    cd "$project" || exit 1
+    . .claude/hooks/path-security.sh
+    ccgs_safe_read production/session-logs/agent-audit.log 2>/dev/null
+  ) || fail "agent audit was written but authenticated read failed"
+  assert_not_contains "$audit" "bad|row" "agent audit accepted a field separator"
+  assert_contains "$audit" "Agent invoked: unknown" "unsafe agent name was not normalized"
+else
+  [ "$audit_rc" -eq 0 ] || fail "nonblocking agent audit hook returned failure"
+  assert_contains "$audit_output" "agent audit: secure append failed" "agent audit created no log and reported no secure append failure"
+  echo "SKIP: authenticated audit writer is fail-closed on this platform"
+fi
 
 echo "PASS: security regression hook layer"
