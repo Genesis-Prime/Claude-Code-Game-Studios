@@ -12,6 +12,26 @@ existing project on the older config files.
 
 ### Security
 
+- Skill frontmatter no longer grants bare Bash or web tools. Config
+  preprocessing uses the exact `${CLAUDE_SKILL_DIR}` helper path and fixed
+  arguments, and CI now lints the prompt layer for dangerous grants and hidden
+  Unicode.
+- Project settings can keep or tighten the standard safety floor; committed
+  automation, review, rigor, workflow, QA, test-strictness, and performance
+  loosenings are ignored and reported. Intentional loosenings belong in the
+  gitignored `project.local.yaml`.
+- Checkpoints are refused when tracked, stripped of terminal controls, capped,
+  and fenced as saved notes. Legacy config symlinks and unsafe maintenance
+  write targets are rejected.
+- Configured project commands reject inline shell/interpreter code and ignore
+  empty or relative PATH entries. Git operations that create commits without a
+  fully staged snapshot now require confirmation.
+- Framework edits, network tools, inline interpreter code, and project command
+  runs are covered by project `ask` rules in every automation mode.
+- Director memory is project-scoped, repository and web content is explicitly
+  treated as data, and the fork now owns its CODEOWNERS, private reporting
+  route, and weekly GitHub Actions Dependabot updates.
+
 - Python-backed hooks and artifact checks now use isolated mode, preventing
   project files from shadowing standard-library modules during validation.
 - Session checkpoint hooks and the status line now consume one validated

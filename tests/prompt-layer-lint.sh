@@ -16,6 +16,7 @@ fi
 
 "$PYTHON" -I - "$ROOT" <<'PY'
 from pathlib import Path
+import json
 import re
 import sys
 
@@ -143,6 +144,56 @@ for path in sorted(root.rglob("*.md")):
                 errors.append(
                     f"{path.relative_to(root)}:{lineno}: hidden Unicode U+{cp:04X}"
                 )
+
+settings = json.loads((root / ".claude/settings.json").read_text(encoding="utf-8"))
+permissions = settings.get("permissions", {})
+required_ask = {
+    "Edit(//**/.claude/**)", "Edit(CLAUDE.md)", "Edit(CLAUDE.local.md)",
+    "Edit(project.yaml)", "Edit(project.local.yaml)",
+    "Edit(/docs/engine-reference/**)", "Edit(/.github/**)",
+    "Bash(*run-project-command.py run *)", "Bash(curl *)", "Bash(wget *)",
+    "Bash(nc *)", "Bash(ncat *)", "Bash(ssh *)", "Bash(scp *)",
+    "Bash(sftp *)", "Bash(rsync *)", "Bash(ftp *)", "Bash(telnet *)",
+    "Bash(sh -c *)", "Bash(bash -c *)", "Bash(zsh -c *)",
+    "Bash(python -c *)", "Bash(python3 -c *)", "Bash(py -c *)",
+    "Bash(node -e *)", "Bash(node --eval *)", "Bash(perl -e *)",
+    "Bash(ruby -e *)", "Bash(osascript *)", "Bash(eval *)",
+}
+required_deny = {
+    "Bash(rm -fr *)", "Bash(rm -r -f *)", "Bash(rm -f -r *)",
+    "Bash(git push --force-with-lease*)", "Bash(git push * --force*)",
+    "Bash(git push * -f*)", "Bash(git push * +*)",
+}
+missing_ask = sorted(required_ask.difference(permissions.get("ask", [])))
+missing_deny = sorted(required_deny.difference(permissions.get("deny", [])))
+if missing_ask:
+    errors.append("settings: missing required ask rules: " + ", ".join(missing_ask))
+if missing_deny:
+    errors.append("settings: missing required deny rules: " + ", ".join(missing_deny))
+
+codeowners = (root / ".github/CODEOWNERS").read_text(encoding="utf-8")
+if "@Genesis-Prime" not in codeowners or "@Donchitos" in codeowners:
+    errors.append("governance: CODEOWNERS does not belong exclusively to the fork owner")
+security = (root / "SECURITY.md").read_text(encoding="utf-8")
+if "Genesis-Prime/Claude-Code-Game-Studios/security/advisories/new" not in security:
+    errors.append("governance: SECURITY.md does not route private reports to the fork")
+dependabot_path = root / ".github/dependabot.yml"
+dependabot = dependabot_path.read_text(encoding="utf-8") if dependabot_path.is_file() else ""
+if not re.search(r'package-ecosystem:\s*["\']?github-actions["\']?', dependabot) \
+        or not re.search(r'interval:\s*["\']?weekly["\']?', dependabot):
+    errors.append("governance: weekly GitHub Actions Dependabot update is missing")
+
+ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+for required in (
+    "ubuntu-latest", "macos-latest", "windows-latest",
+    "bash tests/security-regression.sh",
+    "bash tests/security-regression-config.sh",
+    "bash tests/security-regression-hooks.sh",
+    "bash tests/prompt-layer-lint.sh",
+    "contents: read", "persist-credentials: false",
+):
+    if required not in ci:
+        errors.append(f"CI: missing required security matrix element: {required}")
 
 if errors:
     print("FAIL: prompt-layer lint")
