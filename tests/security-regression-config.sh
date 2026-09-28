@@ -250,12 +250,30 @@ assert_contains "$typed" "engine: Godot (project.yaml)" "engine version validati
 assert_not_contains "$typed" "platform.cert_tier: root" "invalid certification tier reached resolved output"
 assert_contains "$typed" "system_overrides: none" "invalid system override reached resolved output"
 assert_contains "$typed" "testing.strict" "testing.strict scalar skipped enum validation"
+cat > "$project/project.yaml" <<'YAML'
+schema_version: 1
+testing:
+  strict: true
+YAML
+cat > "$project/project.local.yaml" <<'YAML'
+testing:
+  strict: maybe
+YAML
+strict_scalar=$(
+  cd "$project" || exit 1
+  . .claude/hooks/yaml-helper.sh
+  resolve_config --keys testing.strict
+)
+assert_contains "$strict_scalar" "logic=true" "invalid local scalar strictness did not fall through to committed true"
+assert_not_contains "$strict_scalar" "logic=maybe" "invalid local scalar strictness reached resolved output"
+
 cat > "$project/project.local.yaml" <<'YAML'
 testing:
   strict:
     logic: maybe
 YAML
-cat >> "$project/project.yaml" <<'YAML'
+cat > "$project/project.yaml" <<'YAML'
+schema_version: 1
 testing:
   strict:
     logic: true

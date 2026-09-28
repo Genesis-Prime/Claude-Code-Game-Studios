@@ -1610,10 +1610,8 @@ resolve_config() {
   # Its unset default differs per skill by design.
   local ts_out="" k tv parent_strict
   if _rc_want testing.strict; then
-    parent_strict=$(get_effective_yaml_key testing.strict 2>/dev/null)
-    if [ -n "$parent_strict" ] && ! validate_enum_value testing.strict "$parent_strict" 2>/dev/null; then
-      parent_strict=""
-    fi
+    parent_strict=$(resolve_setting testing.strict 2>/dev/null)
+    parent_strict="${parent_strict%%$(printf '\t')*}"
     for k in logic integration visual ui config; do
       tv=$(resolve_setting "testing.strict.$k" 2>/dev/null)
       tv="${tv%%$(printf '\t')*}"
