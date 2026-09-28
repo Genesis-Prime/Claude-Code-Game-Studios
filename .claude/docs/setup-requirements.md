@@ -91,6 +91,11 @@ alone.
 is worth turning on, but it runs on **macOS, Linux and WSL2 only** — it is not
 available on native Windows, which is CCGS's primary platform.
 
+CCGS also ships `permissions.ask` rules for framework edits, network clients,
+inline interpreter code, and typed project-command runs. Ask rules override
+skill grants and local allow rules, but Bash command matching is best-effort;
+the sandbox remains the stronger boundary on supported platforms.
+
 ### One setting CCGS does ship
 
 `permissions.defaultMode` is set to `default` in `.claude/settings.json`, on

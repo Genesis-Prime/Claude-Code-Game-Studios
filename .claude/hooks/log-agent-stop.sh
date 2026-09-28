@@ -38,6 +38,8 @@ fi
 # with no agent name at all while the grep path guarded against it. One guard,
 # both paths.
 [ -z "$AGENT_NAME" ] && AGENT_NAME="unknown"
+AGENT_NAME=$(printf '%s' "$AGENT_NAME" | ccgs_sanitize_text 100)
+case "$AGENT_NAME" in ''|*[!A-Za-z0-9._:-]*) AGENT_NAME="unknown" ;; esac
 
 # Parse session id -- keeps the completion record in the same three-field shape
 # as log-agent.sh so both sides of a spawn belong to an identifiable session.
@@ -47,6 +49,8 @@ else
     SESSION_ID=$(echo "$INPUT" | grep -oE '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/"session_id"[[:space:]]*:[[:space:]]*"//;s/"$//')
 fi
 [ -z "$SESSION_ID" ] && SESSION_ID="unknown"
+SESSION_ID=$(printf '%s' "$SESSION_ID" | ccgs_sanitize_text 100)
+case "$SESSION_ID" in ''|*[!A-Za-z0-9._:-]*) SESSION_ID="unknown" ;; esac
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 printf '%s | %s | Agent completed: %s\n' "$TIMESTAMP" "$SESSION_ID" "$AGENT_NAME" \

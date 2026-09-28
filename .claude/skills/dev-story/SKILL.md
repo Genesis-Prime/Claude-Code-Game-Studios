@@ -4,7 +4,7 @@ description: "Implement a story: ADR guidelines, right programmer agent, code pl
 argument-hint: "[story-path]"
 user-invocable: true
 disable-model-invocation: true
-allowed-tools: Read, Glob, Grep, Write, Edit, Bash, Agent, AskUserQuestion, Bash(bash "*/.claude/skills/dev-story/../../hooks/yaml-helper.sh" resolve_config *)
+allowed-tools: Read, Glob, Grep, Write, Edit, Agent, AskUserQuestion, Bash(bash "${CLAUDE_SKILL_DIR}/../../hooks/yaml-helper.sh" resolve_config --keys automation,workflow,story_granularity,qa.level,testing.strict,system_overrides)
 model: sonnet
 ---
 
@@ -222,7 +222,8 @@ Read from `project.yaml` first, falling back to `.claude/docs/technical-preferen
 
 ### Mark Story In Progress
 
-Silently update two things before spawning any agent:
+Tell the user that the story and sprint status are being marked in progress,
+then update two things before spawning any agent:
 
 1. **`production/sprint-status.yaml`** (if it exists): find the entry matching this story's file path and set `status: in_progress`. Update the top-level `updated` field to today's date. If the file does not exist, say so in one line — `Sprint status not updated: production/sprint-status.yaml absent` — and continue. Do not skip silently: `/sprint-status` reads that file to report progress, so a story that never gets marked `in_progress` is invisible to the very command a producer uses to ask what is moving.
 
@@ -537,7 +538,8 @@ Ready for: `/code-review [file1] [file2]` then `/story-done [story-path]`
 
 ## Phase 7: Update Session State
 
-Silently append to `production/session-state/active.md`:
+Announce the session-state append, then append to
+`production/session-state/active.md`:
 
 ```
 ## Session Extract — /dev-story [date]

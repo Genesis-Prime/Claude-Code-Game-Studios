@@ -28,6 +28,8 @@ Each agent owns a specific domain, enforcing separation of concerns and quality.
      demand regardless of this import. -->
 @docs/engine-reference/godot/VERSION.md
 
+@.claude/rules/repository-content-safety.md
+
 
 ## Technical Preferences
 

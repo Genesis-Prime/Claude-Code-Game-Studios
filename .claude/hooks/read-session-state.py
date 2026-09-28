@@ -79,6 +79,7 @@ def _read_validated(root_arg):
     flags |= getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_CLOEXEC", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
+    flags |= getattr(os, "O_NONBLOCK", 0)
 
     try:
         descriptor = os.open(target, flags)
@@ -92,6 +93,13 @@ def _read_validated(root_arg):
 
         if not stat.S_ISREG(opened_before.st_mode):
             raise StateReadError("opened checkpoint is not a regular file")
+        try:
+            import fcntl
+            open_flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+            if open_flags & os.O_NONBLOCK:
+                fcntl.fcntl(descriptor, fcntl.F_SETFL, open_flags & ~os.O_NONBLOCK)
+        except (AttributeError, ImportError, OSError):
+            pass
         if opened_before.st_nlink != 1:
             raise StateReadError("opened checkpoint has multiple filesystem links")
         if _fingerprint(before_target) != _fingerprint(opened_before):

@@ -102,25 +102,28 @@ Only the explicitly-set `logic` key is overridden; sibling keys come through fro
 
 ### Whitelist — which settings can be locally overridden
 
-Only personal-experience settings can be locally overridden. Project-wide facts
-(engine, stage, naming conventions, what's required on disk) are locked to
-`project.yaml` because divergence between developers would break team coordination.
+Project facts such as engine, stage, naming conventions, and output structure
+are locked to `project.yaml`. Security-sensitive process settings may be
+loosened only in `project.local.yaml`, making the choice local and preventing a
+repository from imposing it on every teammate.
 
 The rule for deciding which side a setting belongs on:
 
-> **If a setting affects what artifacts exist or what they look like on disk,
-> it must be locked to `project.yaml`. If a setting only changes your personal
-> experience (which agents spawn for you, whether you get prompts, your local
-> CI bypass), it can be locally overridden.**
+> **Project facts stay committed. A setting that relaxes review, workflow, QA,
+> command, or performance enforcement may be relaxed only in the gitignored
+> local file; the committed file may hold the default or a stricter value.**
 
-**Locally overridable** (personal experience only — no effect on artifacts on disk):
+**Locally overridable** (explicit per-developer policy):
 
 | Setting | Why local override makes sense |
 |---------|-------------------------------|
 | `modes.review_mode` | How much AI review you personally want |
+| `modes.rigor` | Your local process weight; committed values may only tighten the built-in floor |
+| `modes.workflow` | Your local document workflow tier |
 | `modes.automation` | How often the AI prompts you |
 | `modes.automation_always_ask` | Your personal safety categories |
 | `team.size` | Which agents spawn for your reviews (review depth differs, artifacts don't) |
+| `qa.level` | Your local evidence requirement tier |
 | `testing.strict.*` (each type) | Whether failures block your local work (CI still enforces project.yaml defaults) |
 | `performance.enforce` | Whether budget violations block your local work (CI enforces project defaults) |
 | `features.session_state` | Your session tracking preference |
@@ -138,11 +141,9 @@ The rule for deciding which side a setting belongs on:
 | `performance.target_framerate`, `frame_budget_ms`, `draw_call_limit`, `memory_ceiling_mb` | Game budgets, shared targets |
 | `accessibility.target` | Game commitment, project-wide |
 | `cadence.*` | Sprint/milestone length affects team coordination |
-| `modes.rigor` | Fronts the four below — locked for the same reason they are |
-| `modes.workflow` and `workflow_overrides` | Affects which sections are required in authored docs |
+| `workflow_overrides` | Project-wide per-system workflow choices |
 | `modes.story_granularity` | Affects how big stories are in repo — team must be consistent |
 | `docs.density` | Affects how deep authored docs are — team must produce consistent docs |
-| `qa.level` | Affects what test evidence stories must include on disk |
 | `qa.coverage_minimum` | Project quality bar |
 | `strict_gate_checks` | Affects whether `project.stage` advances — a project-wide write |
 | `commands.*` | Build/test commands are project facts |
@@ -150,7 +151,7 @@ The rule for deciding which side a setting belongs on:
 
 > **A locked key written into `project.local.yaml` by hand is reported, not
 > swallowed.** `/settings --local` refuses to write one, but the
-> file is meant to be hand-edited and that path had no guard: `modes.rigor: full`
+> file is meant to be hand-edited and that path had no guard: `engine.name: Unity`
 > there is a real key with a legal value, so enum validation passes it, and then
 > resolution never consults the local file for that path — the setting vanishes
 > and the user sees the default they were trying to override, with no error
@@ -209,29 +210,25 @@ When skills or hooks read either file:
 
 ---
 
-### Two-developer clash scenarios — and why the whitelist prevents them
+### Two-developer local policy differences
 
 **File-level conflict (`project.yaml`):**
 Standard git merge conflict. Each developer's `project.local.yaml` is gitignored
 and never collides with another developer's. Normal git workflow handles team-wide
 changes.
 
-**Logical inconsistency (prevented by whitelist):**
-
-Example of what the whitelist prevents:
+**Explicit local loosening:**
 
 > Sarah sets `modes.workflow: minimal` locally to skip GDD requirements. She
 > doesn't write GDDs because her local mode doesn't require them. Mike runs
 > `/gate-check` with the team default of `standard`; gate-check sees missing
 > GDDs and fails.
 
-This can't happen because `modes.workflow` is locked to `project.yaml`. Same
-for `qa.level`, `docs.density`, `strict_gate_checks`, `naming.*`, and every
-other setting that affects what artifacts exist on disk.
-
-Personal experience settings (`automation`, `review_mode`, `team.size`,
-`testing.strict.*`, `performance.enforce`) can diverge freely without affecting
-anyone else.
+This can happen only when Sarah deliberately places the loosening in her
+gitignored `project.local.yaml`. The shared `project.yaml` cannot silently impose
+that looser tier because the resolver ignores and reports committed loosenings.
+Local workflow, rigor, and QA overrides are therefore personal risk choices;
+their effects must be reviewed before shared artifacts are committed.
 
 ---
 
@@ -246,7 +243,8 @@ The answer depends on which kind of difference you're talking about:
 
 - Teammate A: local `review_mode: full`, `automation: collaborative`, `testing.strict.logic: true`
 - Teammate B: local `review_mode: solo`, `automation: autonomous`, `testing.strict.logic: false`
-- Both bound by the same project.yaml-locked settings (e.g. `workflow: standard`, `qa.level: standard`)
+- Both inherit the same committed safety floor unless either developer chooses
+  a local workflow or QA loosening
 
 B writes a GDD that meets `workflow: standard` (all 5 required sections present).
 B's `/design-review` runs with `review_mode: solo` — fast advisory check, no
@@ -261,7 +259,7 @@ things is the value of having multiple reviewers. The artifacts on disk are the
 same; only review depth differs. Nothing about this scenario creates project-state
 divergence.
 
-**Different requirements (PREVENTED by the whitelist):**
+**Different requirements (explicit local choice):**
 
 If `qa.level` were locally overridable:
 
@@ -270,9 +268,10 @@ If `qa.level` were locally overridable:
 - A pulls. A's `qa.level: standard` requires evidence. A's `/story-done` would have rejected it.
 - A's next `/gate-check` fails because evidence is missing across multiple of B's "Complete" stories.
 
-This is the artifact divergence problem. To prevent it, `qa.level` is locked to
-`project.yaml`. The team agrees together on what's required; individuals override
-only their personal experience, never the team's standards.
+This is the artifact divergence risk. The fork prevents a repository from
+silently choosing the looser policy for everyone, while still allowing a
+developer to make the choice locally. CI has no local file and applies the
+standard built-in floor.
 
 **The pattern to remember:**
 
@@ -280,7 +279,7 @@ only their personal experience, never the team's standards.
 |----------------|---------|
 | Different review depth (review_mode, team.size) | Stricter reviewer surfaces more findings — healthy. Artifacts unchanged. |
 | Different local strictness on failures (testing.strict.*, performance.enforce) | Stricter dev's local /story-done blocks earlier — they fix it locally. CI uses project.yaml defaults so team-wide quality bar stays. |
-| Different artifact requirements (workflow, qa.level, docs.density, etc.) | **Can't happen — these are locked.** Team agrees once in project.yaml. |
+| Different artifact requirements from a local workflow, rigor, or QA override | Explicit local risk choice; the committed safety floor and CI remain standard or stricter. |
 
 ---
 
@@ -331,7 +330,10 @@ behavior: strict project defaults for CI, looser developer overrides for local w
 **Set by:** `/start`, `/adopt`, `/settings`  
 **Read by:** See skill table below
 
-**Priority chain (all skills):** inline argument flag → `modes.review_mode` in `project.yaml` → `production/review-mode.txt` (legacy fallback) → `modes.rigor` expansion (no terminal default; `minimal`→`solo`, `standard`→`lean`, `full`→`full`)
+**Priority chain (all skills):** inline argument flag → local override →
+`modes.review_mode` in `project.yaml` → `production/review-mode.txt` only when
+`project.yaml` is absent → `modes.rigor` expansion (no terminal default;
+`minimal`→`solo`, `standard`→`lean`, `full`→`full`)
 
 > **design-review follows the standard chain.** `modes.review_mode` controls
 > design-review depth, its inline flag is `--review` for consistency with every
@@ -459,18 +461,14 @@ the pipeline runs.
 **Controls:** How much process the project carries overall — the single question
 `/start` asks that sets the six knobs below
 **Values:** `minimal` | `standard` | `full`
-**Default:** `minimal` — see the rationale block above `_yaml_helper_defaults`
-in `.claude/hooks/yaml-helper.sh`. Short version: the heavier tier cost several
-times more to reach working code without producing a better result.
+**Default:** `standard`
 **Set by:** `/start` (Phase 3d), `/settings`
 **Read by:** nothing directly — it is read *through* the six knobs it supplies
 
-**Priority chain:** `modes.rigor` in `project.yaml` → hardcoded default `minimal`
-(**locked** — not overridable from `project.local.yaml`, like the four *on-disk*
-knobs it fronts — `modes.workflow`, `docs.density`, `qa.level`,
-`modes.story_granularity` — because those five change what artifacts exist on
-disk. The two personal-experience knobs it also fronts, `modes.review_mode` and
-`team.size`, stay locally overridable.)
+**Priority chain:** `modes.rigor` in `project.local.yaml` → allowed committed
+`project.yaml` value → hardcoded default `standard`. A committed `minimal`
+value is below the safety floor, so it is ignored with a security notice; use a
+local override for an intentional lightweight workflow.
 
 ---
 
@@ -790,6 +788,9 @@ recommend and proceed — the tradeoff between user control and speed
 
 > **Safety net — `automation_always_ask`:** Even in `autonomous` mode, certain
 > categories of decision can be configured to always prompt. See next section.
+> Project `permissions.ask` rules are a separate enforcement layer and override
+> skill grants and local allow rules for framework edits, network commands,
+> inline interpreter code, and configured project commands.
 
 ---
 

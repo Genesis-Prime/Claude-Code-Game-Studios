@@ -3,7 +3,7 @@ name: settings
 description: "View or change project config — effective merged values, or set locally in project.local.yaml."
 argument-hint: "[key | key=value | --local key=value]"
 user-invocable: true
-allowed-tools: Read, Glob, Grep, Write, Edit, Bash, AskUserQuestion
+allowed-tools: Read, Glob, Grep, Write, Edit, AskUserQuestion
 model: sonnet
 ---
 
@@ -307,6 +307,23 @@ When the effective value is empty (key not set anywhere), print just:
    (`Invalid value '<value>' for '<key>'. Allowed: ...`) and the skill
    exits without writing. If it returns 0, the value is either valid
    or the key has no enum constraint — proceed.
+
+1b. **Committed safety floor**: committed `project.yaml` may tighten safety
+but may not loosen the built-in baseline. Redirect these looser values to the
+local path and explain that committed loosenings affect every teammate:
+
+- `modes.automation=guided|autonomous` (baseline `collaborative`)
+- `modes.review_mode=solo`, `modes.rigor=minimal`,
+  `modes.workflow=minimal`, or `qa.level=minimal` (baseline middle tier)
+- `testing.strict.<leaf>=false` for any strictness leaf (baseline `true`)
+- `performance.enforce=off` (baseline `warn`)
+
+Do not write those values to `project.yaml`. Say:
+> "This value loosens a shared safety setting, so committed `project.yaml`
+> would ignore it. Use `/settings --local <key>=<value>` to apply it only for
+> this developer."
+
+Then stop. Stricter values and values equal to the baseline continue below.
 
 2. **Reserved warning**: if `<key>` is in `RESERVED_SET` (Phase 1b), print
    BEFORE the approval prompt:

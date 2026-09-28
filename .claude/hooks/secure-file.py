@@ -128,6 +128,16 @@ def _check_open_file(descriptor):
     return info
 
 
+def _clear_nonblock(descriptor):
+    try:
+        import fcntl
+        flags = fcntl.fcntl(descriptor, fcntl.F_GETFL)
+        if flags & os.O_NONBLOCK:
+            fcntl.fcntl(descriptor, fcntl.F_SETFL, flags & ~os.O_NONBLOCK)
+    except (AttributeError, ImportError, OSError):
+        pass
+
+
 def _acquire_write_lock(parent_descriptor):
     import fcntl
     fcntl.flock(parent_descriptor, fcntl.LOCK_EX)
@@ -153,12 +163,14 @@ def _descriptor_operation(operation, root, parts):
     binary = getattr(os, "O_BINARY", 0)
     nofollow = getattr(os, "O_NOFOLLOW", 0)
     cloexec = getattr(os, "O_CLOEXEC", 0)
+    nonblock = getattr(os, "O_NONBLOCK", 0)
     lock = None
     try:
         if operation == "read":
-            descriptor = os.open(name, os.O_RDONLY | binary | nofollow | cloexec, dir_fd=parent)
+            descriptor = os.open(name, os.O_RDONLY | binary | nofollow | cloexec | nonblock, dir_fd=parent)
             try:
                 info = _check_open_file(descriptor)
+                _clear_nonblock(descriptor)
                 if info.st_size > MAX_READ_BYTES:
                     raise SecureFileError("file exceeds the 16 MiB safety limit")
                 chunks = []
@@ -175,17 +187,29 @@ def _descriptor_operation(operation, root, parts):
             finally:
                 os.close(descriptor)
 
-        data = _read_stdin()
         lock = _acquire_write_lock(parent)
+        if operation == "delete":
+            try:
+                existing = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                return b""
+            _reject_redirect(existing, "target")
+            if not stat.S_ISREG(existing.st_mode) or existing.st_nlink != 1:
+                raise SecureFileError("delete target is not a singly-linked regular file")
+            os.unlink(name, dir_fd=parent)
+            return b""
+
+        data = _read_stdin()
         if operation == "append":
             existing = b""
             try:
-                descriptor = os.open(name, os.O_RDONLY | binary | nofollow | cloexec, dir_fd=parent)
+                descriptor = os.open(name, os.O_RDONLY | binary | nofollow | cloexec | nonblock, dir_fd=parent)
             except FileNotFoundError:
                 descriptor = None
             if descriptor is not None:
                 try:
                     info = _check_open_file(descriptor)
+                    _clear_nonblock(descriptor)
                     if info.st_size > MAX_READ_BYTES:
                         raise SecureFileError("file exceeds the 16 MiB safety limit")
                     chunks = []
@@ -244,8 +268,8 @@ def _descriptor_operation(operation, root, parts):
 
 
 def main():
-    if len(sys.argv) != 4 or sys.argv[1] not in ("append", "replace", "read", "mkdir"):
-        sys.stderr.write("secure-file: expected OPERATION ROOT RELATIVE_PATH\n")
+    if len(sys.argv) != 4 or sys.argv[1] not in ("append", "replace", "read", "mkdir", "delete"):
+        sys.stderr.write("secure-file: expected append|replace|read|mkdir|delete ROOT RELATIVE_PATH\n")
         return 2
     operation, root_arg, relative = sys.argv[1:]
     try:

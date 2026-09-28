@@ -2,8 +2,8 @@
 
 ## Supported Versions
 
-Only the `main` branch receives security fixes. Forks and older releases are
-not supported.
+Only the `main` branch of the Genesis-Prime fork receives security fixes for
+this fork. Older releases are not supported.
 
 ## Reporting a Vulnerability
 
@@ -11,7 +11,10 @@ not supported.
 
 Use GitHub's private vulnerability reporting instead:
 
-**[Report a vulnerability →](https://github.com/Donchitos/Claude-Code-Game-Studios/security/advisories/new)**
+**[Report a vulnerability →](https://github.com/Genesis-Prime/Claude-Code-Game-Studios/security/advisories/new)**
+
+If the issue exists only in the upstream Donchitos repository and not in this
+fork, report it through the upstream repository's security policy instead.
 
 Include as much detail as possible:
 - Description of the vulnerability and what it affects

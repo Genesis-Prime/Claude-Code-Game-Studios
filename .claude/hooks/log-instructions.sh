@@ -103,6 +103,10 @@ shorten() {
 }
 FILE_SHORT=$(shorten "$FILE_VAL")
 PARENT_SHORT=$(shorten "$PARENT_VAL")
+FILE_SHORT=$(printf '%s' "$FILE_SHORT" | ccgs_sanitize_text 300)
+PARENT_SHORT=$(printf '%s' "$PARENT_SHORT" | ccgs_sanitize_text 300)
+REASON_VAL=$(printf '%s' "$REASON_VAL" | ccgs_sanitize_text 80)
+INPUT_SAFE=$(printf '%s' "$INPUT" | ccgs_sanitize_text 2000)
 
 {
     printf '%s | %-16s | %s%s\n' \
@@ -110,7 +114,7 @@ PARENT_SHORT=$(shorten "$PARENT_VAL")
         "${PARENT_SHORT:+  (via $PARENT_SHORT)}"
     # Raw payload on the following line, prefixed so the log stays greppable and
     # so an unrecognised schema is still recoverable from the file itself.
-    printf '%s   RAW %s\n' "$TIMESTAMP" "$INPUT"
+    printf '%s   RAW %s\n' "$TIMESTAMP" "$INPUT_SAFE"
 } | ccgs_safe_append "$LOG" || echo "instruction audit: secure append failed" >&2
 
 exit 0

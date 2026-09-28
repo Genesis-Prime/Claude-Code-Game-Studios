@@ -38,6 +38,8 @@ fi
 # with no agent name at all while the grep path guarded against it. One guard,
 # both paths.
 [ -z "$AGENT_NAME" ] && AGENT_NAME="unknown"
+AGENT_NAME=$(printf '%s' "$AGENT_NAME" | ccgs_sanitize_text 100)
+case "$AGENT_NAME" in ''|*[!A-Za-z0-9._:-]*) AGENT_NAME="unknown" ;; esac
 
 # Parse session id -- session-stop.sh tallies spawns per session, so the record
 # is useless without it. Same jq/grep fallback pattern as the agent name.
@@ -47,6 +49,8 @@ else
     SESSION_ID=$(echo "$INPUT" | grep -oE '"session_id"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/"session_id"[[:space:]]*:[[:space:]]*"//;s/"$//')
 fi
 [ -z "$SESSION_ID" ] && SESSION_ID="unknown"
+SESSION_ID=$(printf '%s' "$SESSION_ID" | ccgs_sanitize_text 100)
+case "$SESSION_ID" in ''|*[!A-Za-z0-9._:-]*) SESSION_ID="unknown" ;; esac
 
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 # Field order is timestamp | session | event -- session-stop.sh greps the

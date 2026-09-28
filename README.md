@@ -213,15 +213,14 @@ which GDD sections are required, `docs.density`, `qa.level`,
 `story_granularity`, `review_mode` — how many director agents review your work,
 and `team.size`), so `/start` asks it once instead of six times:
 
-- **`minimal`** (default) — jam-game speed. No GDDs required, terse docs, minimal QA evidence, solo review. `/start` → `/setup-engine` → `/dev-story` in a handful of steps.
-- **`standard`** — 5 required GDD sections, balanced doc depth, standard QA evidence, lean review.
+- **`minimal`** — jam-game speed. No GDDs required, terse docs, minimal QA evidence, solo review. Set this in gitignored `project.local.yaml` for a local fast path.
+- **`standard`** (default) — 5 required GDD sections, balanced doc depth, standard QA evidence, lean review.
 - **`full`** — all 8 GDD sections, thorough docs, full QA evidence on every story type, full director review.
 
-`minimal` is the default because it was measured against the alternatives: the
-heavier tier cost several times more to reach working code, was ranked last on
-play quality, and returned nothing measurable when a fresh developer inherited
-the project. Raise it in one `/settings` call when your project grows — `/help`
-and `/gate-check` will suggest it when they see the signs.
+Committed settings can keep the `standard` floor or tighten it to `full`; a
+committed loosening is ignored and reported. Developers can choose `minimal`
+locally with `/settings --local modes.rigor=minimal` without weakening every
+teammate's clone.
 
 Two escape hatches keep one setting from being a blunt instrument.
 **`system_overrides`** holds a single system to a higher standard than the rest
@@ -345,10 +344,11 @@ You stay in control. The agents provide structure and expertise, not autonomy.
 
 > **Note**: `validate-commit.sh`, `validate-assets.sh`, and `validate-skill-change.sh` fire on every Bash/Write tool call and exit immediately (exit 0) when the command or file path is not relevant. This is normal hook behavior — not a performance concern.
 
-**Permission rules** in `settings.json` leave shell commands under normal
-approval and additionally deny known destructive operations such as force push,
-`rm -rf`, and reading `.env` files. Read-only-looking Git and test commands can
-still invoke repository-controlled helpers or code, so they are not auto-allowed.
+**Permission rules** in `settings.json` deny known destructive operations and
+ask before framework edits, outbound network commands, inline interpreter code,
+and configured project-command runs. Skills pre-approve only their exact
+read-only config helper command. These Bash patterns are a prompt layer, so use
+Claude Code's sandbox as the filesystem and network boundary where available.
 
 ### Path-Scoped Rules
 

@@ -31,6 +31,10 @@ export LC_ALL=C
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO" || exit 1
+. "$REPO/.claude/hooks/path-security.sh" 2>/dev/null || {
+  echo "migration: trusted file helper is unavailable" >&2
+  exit 1
+}
 
 MODE="migrate"
 case "${1:-}" in
@@ -165,10 +169,43 @@ yaml_num() { { [ -z "$1" ] || ! is_num "$1"; } && printf 'null' || printf '%s' "
 re_quote() { printf '%s' "$1" | sed 's/[][\\.*^$(){}?+|/]/\\&/g'; }
 
 trim_line() {
-  sed -e 's/\r//g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' "$1" | head -1
+  ccgs_safe_read "$1" "$REPO" 2>/dev/null \
+    | sed -e 's/\r//g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+    | head -1
 }
 
 # --- preflight --------------------------------------------------------------
+
+for _write_target in "$PY" "$REPORT"; do
+  if [ -L "$_write_target" ]; then
+    echo "REFUSED: migration target is a symbolic link: $_write_target" >&2
+    exit 3
+  fi
+done
+
+for _legacy_input in "$STAGE_TXT" "$REVIEW_TXT" "$TP"; do
+  if [ -L "$_legacy_input" ]; then
+    echo "REFUSED: legacy input is a symbolic link: $_legacy_input" >&2
+    exit 3
+  fi
+done
+
+# An authenticated-read failure must never be interpreted as an empty legacy
+# value. That would let migration report that existing values agree, or write a
+# partial project.yaml, on a platform where descriptor-relative traversal is
+# unavailable. Preflight only the inputs this invocation can actually consume;
+# the shipped placeholder technical-preferences file is not legacy data.
+for _legacy_input in "$STAGE_TXT" "$REVIEW_TXT"; do
+  if [ -f "$_legacy_input" ] && ! ccgs_safe_read "$_legacy_input" "$REPO" >/dev/null; then
+    echo "REFUSED: legacy input is linked, redirected, unreadable, or unsupported on this platform: $_legacy_input" >&2
+    exit 3
+  fi
+done
+if [ -f "$TP" ] && tp_configured \
+    && ! ccgs_safe_read "$TP" "$REPO" >/dev/null; then
+  echo "REFUSED: legacy input is linked, redirected, unreadable, or unsupported on this platform: $TP" >&2
+  exit 3
+fi
 
 # A legacy file whose value project.yaml ALREADY carries is a MIRROR, not a
 # rival source of truth.
@@ -279,7 +316,13 @@ if [ "$MODE" = "finalize" ]; then
     exit 4
   fi
   for f in "$STAGE_TXT" "$REVIEW_TXT"; do
-    [ -f "$f" ] && rm -f "$f" && echo "deleted $f"
+    if [ -e "$f" ] || [ -L "$f" ]; then
+      if ! ccgs_safe_delete "$f" "$REPO"; then
+        echo "REFUSED: legacy target is linked, redirected, or unsafe: $f" >&2
+        exit 3
+      fi
+      echo "deleted $f"
+    fi
   done
   echo "NOTE: $TP is NOT deleted — it still holds Forbidden Patterns and"
   echo "      Allowed Libraries, which have no project.yaml equivalent."
@@ -449,13 +492,10 @@ if [ -f "$TP" ]; then
 fi
 [ -f "$TP" ] && manual "Forbidden Patterns and Allowed Libraries stay in $TP — they have no project.yaml equivalent"
 
-# v1.0 had no `modes.rigor`; its fixed process level matches v1.1's `standard`.
-# v1.1 defaults `rigor` to `minimal`, and this script writes nothing it did not
-# read, so a migrated project lands on `minimal` — fewer required GDD sections,
-# terser docs, lighter test evidence, no director panels. That is a behaviour
-# change the upgrader never chose; say so in the one artifact they read first.
-warn "modes.rigor is not written — v1.1 defaults it to \`minimal\`, which is lighter than v1.0 behaved (v1.0 matched \`standard\`). To keep v1.0's process level, add \`modes: { rigor: standard }\` to project.yaml or run \`/settings modes.rigor=standard\`"
-manual "Decide \`modes.rigor\`: leave unset for the lighter v1.1 default, or pin \`standard\` to keep v1.0's process level"
+# v1.0 had no `modes.rigor`; its fixed process level matches the current
+# security-focused `standard` default. Leaving rigor unset preserves that
+# behavior. A developer who wants a lightweight local run sets `minimal` in
+# project.local.yaml after migration.
 
 # Report the STRING keys that land in the file as `null`, which the numeric
 # family above already does and this half never did.
@@ -644,7 +684,10 @@ fi
     echo "  coverage_minimum: $TEST_COV"
     echo ""
   fi
-} > "$PY"
+} | ccgs_safe_replace "$PY" "$REPO" || {
+  echo "migration: refused unsafe or unwritable target $PY" >&2
+  exit 1
+}
 
 # --- write the report -------------------------------------------------------
 
@@ -729,7 +772,10 @@ mkdir -p production 2>/dev/null
   echo "## Manual review"
   echo ""
   if [ -n "$MANUAL" ]; then printf '%s' "$MANUAL"; else echo "None."; fi
-} > "$REPORT"
+} | ccgs_safe_replace "$REPORT" "$REPO" || {
+  echo "migration: refused unsafe or unwritable target $REPORT" >&2
+  exit 1
+}
 
 echo "wrote $PY"
 echo "wrote $REPORT"

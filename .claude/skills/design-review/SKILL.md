@@ -3,7 +3,7 @@ name: design-review
 description: "Reviews one design document for completeness, internal consistency, implementability, and design standards. Before handing to programmers."
 argument-hint: "[path-to-design-doc] [--review full|lean|solo]"
 user-invocable: true
-allowed-tools: Read, Glob, Grep, Write, Edit, Bash, Agent, AskUserQuestion, Bash(bash "*/.claude/skills/design-review/../../hooks/yaml-helper.sh" resolve_config *)
+allowed-tools: Read, Glob, Grep, Write, Edit, Agent, AskUserQuestion, Bash(bash "${CLAUDE_SKILL_DIR}/../../hooks/yaml-helper.sh" resolve_config --keys review_mode,automation,workflow,system_overrides)
 model: sonnet
 ---
 
@@ -59,13 +59,12 @@ appear in the output and doesn't block the skip).
 
 - **All `UNCHANGED`** and the log's latest entry carries a verdict — surface it:
   *"This document is byte-identical to its last review on [date] (verdict:
-  [verdict])."* If that verdict was APPROVED, offer via `AskUserQuestion`:
-  `[A] Use the prior verdict (Recommended)` / `[B] Re-review anyway` —
-  `guided` proceeds with [A] and notes it; `autonomous` logs via
-  `log_decision` and uses the prior verdict. If it was NEEDS REVISION or
-  MAJOR REVISION NEEDED, say so plainly: the document has not changed since
-  it failed review — the prior findings stand; revising the document is the
-  next step, not re-reviewing it. Offer to display the prior findings from
+  [verdict])."* Always use `AskUserQuestion` before accepting any prior verdict:
+  `[A] Use the prior verdict (Recommended)` / `[B] Re-review anyway`. This prompt
+  is mandatory in every automation mode; guided and autonomous must not select
+  an answer automatically. If the prior verdict was NEEDS REVISION or MAJOR
+  REVISION NEEDED, explain that the unchanged findings still stand, then ask
+  whether to accept them or re-review. Offer to display the prior findings from
   the log.
 - **Only the registry line reads `CHANGED`** (doc `UNCHANGED`) — the prior
   verdict stands except for cross-document facts: re-verify the doc's

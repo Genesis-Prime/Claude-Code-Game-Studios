@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 
 
 MAX_PATHS = 4096
@@ -15,6 +16,7 @@ MAX_TOTAL_BYTES = 32 * 1024 * 1024
 CODE_EXTENSIONS = (".gd", ".cs", ".cpp", ".cc", ".hpp", ".h", ".c", ".py", ".js", ".ts", ".rs", ".java", ".kt", ".lua")
 HARD_CODED = re.compile(rb"(damage|health|speed|rate|chance|cost|duration)[ \t]*[:=][ \t]*[0-9]+", re.I)
 UNOWNED = re.compile(rb"(TODO|FIXME|HACK)[^(]", re.I)
+DEADLINE = None
 
 
 class ScanError(Exception):
@@ -22,6 +24,11 @@ class ScanError(Exception):
 
 
 def _git(root, args, input_data=None, timeout=5):
+    if DEADLINE is not None:
+        remaining = DEADLINE - time.monotonic()
+        if remaining <= 0:
+            raise ScanError("Git index scan exceeded the shared 12 second deadline")
+        timeout = min(timeout, remaining)
     kwargs = {
         "cwd": root,
         "stdout": subprocess.PIPE,
@@ -136,16 +143,19 @@ def _required_sections(workflow):
 
 
 def main():
+    global DEADLINE
     if len(sys.argv) != 4:
         sys.stderr.write("validate-staged: expected ROOT WORKFLOW CODE_ROOT\n")
         return 2
     root, workflow, code_root = sys.argv[1:]
+    DEADLINE = time.monotonic() + 11.5
     try:
         changed = _paths(root)
         relevant = []
         for path in changed:
-            is_json = path.startswith("assets/data/") and path.lower().endswith(".json")
-            is_gdd = path.startswith("design/gdd/") and path.lower().endswith(".md")
+            folded = path.casefold()
+            is_json = folded.startswith("assets/data/") and folded.endswith(".json")
+            is_gdd = folded.startswith("design/gdd/") and folded.endswith(".md")
             is_code = bool(code_root) and path.startswith(code_root.rstrip("/") + "/")
             if is_json or is_gdd or is_code:
                 relevant.append(path)
@@ -171,12 +181,13 @@ def main():
         if path not in blobs:
             continue
         data = blobs[path]
-        if path.startswith("assets/data/") and path.lower().endswith(".json"):
+        folded = path.casefold()
+        if folded.startswith("assets/data/") and folded.endswith(".json"):
             try:
                 json.loads(data.decode("utf-8-sig"))
             except (UnicodeDecodeError, json.JSONDecodeError):
                 blocked.append("BLOCKED: {} is not valid JSON in the Git index".format(path))
-        if path.startswith("design/gdd/") and path.lower().endswith(".md") and sections:
+        if folded.startswith("design/gdd/") and folded.endswith(".md") and sections:
             text = data.decode("utf-8", errors="replace").lower()
             for section in sections:
                 if section.lower() not in text:

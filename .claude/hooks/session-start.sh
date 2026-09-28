@@ -32,7 +32,7 @@ ccgs_bootstrap_trusted_root "$_CCGS_HOOK_DIR/../.." || exit 0
 echo "=== Claude Code Game Studios — Session Context ==="
 
 # Current branch
-BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | ccgs_sanitize_text 120)
 if [ -n "$BRANCH" ]; then
     echo "Branch: $BRANCH"
 
@@ -40,28 +40,46 @@ if [ -n "$BRANCH" ]; then
     echo ""
     echo "Recent commits:"
     git log --oneline -5 2>/dev/null | while read -r line; do
+        line=$(printf '%s' "$line" | ccgs_sanitize_text 240)
         echo "  $line"
     done
 fi
 
-# Resolve review_mode the same way skills do: resolve_setting applies the FULL
-# chain (project.local.yaml -> project.yaml -> legacy review-mode.txt -> modes.rigor
-# expansion -> default). modes.review_mode is rigor-fronted and locally overridable,
+# Resolve review_mode the same way skills do: resolve_setting applies the full
+# chain (project.local.yaml -> allowed project.yaml value -> modes.rigor
+# expansion -> default). The legacy mirror is consulted only when project.yaml
+# does not exist. modes.review_mode is rigor-fronted and locally overridable,
 # so only resolve_setting reflects both a rigor-derived value (a project that set
 # only `rigor: minimal` shows `solo`) and a local override. get_effective_yaml_key
 # returns empty for a rigor-only project, which would leave the banner showing a
 # stale `lean`.
 REVIEW_MODE=""
-if [ -f "project.yaml" ] && [ -f "$_CCGS_HOOK_DIR/yaml-helper.sh" ]; then
+if [ -f "$_CCGS_HOOK_DIR/yaml-helper.sh" ]; then
     source "$_CCGS_HOOK_DIR/yaml-helper.sh"
-    REVIEW_MODE=$(resolve_setting modes.review_mode 2>/dev/null | cut -f1)
 fi
-if [ -z "$REVIEW_MODE" ] && [ -f "production/review-mode.txt" ]; then
-    REVIEW_MODE=$(head -1 production/review-mode.txt 2>/dev/null | tr -d '[:space:]')
+if [ -f "$CCGS_ROOT/project.yaml" ] && command -v resolve_setting >/dev/null 2>&1; then
+    REVIEW_MODE=$(resolve_setting modes.review_mode 2>/dev/null | cut -f1)
+elif [ ! -f "$CCGS_ROOT/project.yaml" ]; then
+    if [ -e "production/review-mode.txt" ] || [ -L "production/review-mode.txt" ]; then
+        if _REVIEW_RAW=$(ccgs_safe_read "production/review-mode.txt" "$CCGS_ROOT" 2>/dev/null); then
+            REVIEW_MODE=$(printf '%s\n' "$_REVIEW_RAW" | sed -n '1p' | tr -d '\r' \
+                | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        else
+            echo "[!] Ignored linked, redirected, or non-regular production/review-mode.txt."
+        fi
+    fi
+fi
+if [ -n "$REVIEW_MODE" ]; then
+    if command -v validate_enum_value >/dev/null 2>&1; then
+        validate_enum_value modes.review_mode "$REVIEW_MODE" >/dev/null 2>&1 || REVIEW_MODE=""
+    else
+        case "$REVIEW_MODE" in solo|lean|full) : ;; *) REVIEW_MODE="" ;; esac
+    fi
 fi
 if [ -z "$REVIEW_MODE" ]; then
     REVIEW_MODE="lean"
 fi
+REVIEW_MODE=$(printf '%s' "$REVIEW_MODE" | ccgs_sanitize_text 40)
 echo ""
 echo "Review mode: $REVIEW_MODE"
 
@@ -74,24 +92,49 @@ if [ -f "$_CCGS_HOOK_DIR/yaml-helper.sh" ]; then
     fi
     # Hard-error guard: project.local.yaml requires a project.yaml base
     if ! BASE_ERR=$(validate_local_yaml_base 2>&1); then
+        BASE_ERR=$(printf '%s' "$BASE_ERR" | ccgs_sanitize_text 500)
         echo ""
         echo "[!] $BASE_ERR"
     fi
     if [ -f "project.yaml" ]; then
-        SCHEMA_ERRORS=$(validate_yaml_enum project.yaml 2>&1)
+        SCHEMA_ERRORS=$(validate_yaml_enum "$CCGS_ROOT/project.yaml" 2>&1)
         if [ -n "$SCHEMA_ERRORS" ]; then
+            SCHEMA_ERRORS=$(printf '%s' "$SCHEMA_ERRORS" | ccgs_sanitize_multiline 4000)
             echo ""
             echo "[!] project.yaml schema errors:"
             echo "$SCHEMA_ERRORS" | sed 's/^/    /'
         fi
     fi
     if [ -f "project.local.yaml" ]; then
-        SCHEMA_ERRORS=$(validate_yaml_enum project.local.yaml 2>&1)
+        SCHEMA_ERRORS=$(validate_yaml_enum "$CCGS_ROOT/project.local.yaml" 2>&1)
         if [ -n "$SCHEMA_ERRORS" ]; then
+            SCHEMA_ERRORS=$(printf '%s' "$SCHEMA_ERRORS" | ccgs_sanitize_multiline 4000)
             echo ""
             echo "[!] project.local.yaml schema errors:"
             echo "$SCHEMA_ERRORS" | sed 's/^/    /'
         fi
+    fi
+    SECURITY_NOTICES=$(config_security_notices 2>/dev/null)
+    if [ -n "$SECURITY_NOTICES" ]; then
+        echo ""
+        printf '%s\n' "$SECURITY_NOTICES" | while IFS= read -r notice; do
+            notice=$(printf '%s' "$notice" | ccgs_sanitize_text 300)
+            [ -n "$notice" ] && echo "[!] $notice"
+        done
+    fi
+fi
+
+# Recovery notes are emitted before filesystem scans so a slow or hostile code
+# tree cannot consume the hook budget before the checkpoint reaches context.
+if command -v session_state_enabled >/dev/null 2>&1 && session_state_enabled \
+    && ccgs_session_state_path_present "$CCGS_ROOT"; then
+    echo ""
+    if ccgs_emit_checkpoint "$CCGS_ROOT"; then
+        :
+    else
+        _checkpoint_rc=$?
+        [ "$_checkpoint_rc" -eq 2 ] \
+            || echo "[!] Session state failed security validation; automatic recovery skipped."
     fi
 fi
 
@@ -106,12 +149,23 @@ fi
 # nobody passed. Helpers emit observations, never verdicts (CLAUDE.md).
 STAGE_YAML=""
 STAGE_TXT=""
-if [ -f "project.yaml" ] && command -v get_yaml_key >/dev/null 2>&1; then
-    STAGE_YAML=$(get_yaml_key project.yaml project.stage 2>/dev/null)
+if [ -f "$CCGS_ROOT/project.yaml" ] && command -v get_yaml_key >/dev/null 2>&1; then
+    STAGE_YAML=$(get_yaml_key "$CCGS_ROOT/project.yaml" project.stage 2>/dev/null)
 fi
-if [ -f "production/stage.txt" ]; then
-    STAGE_TXT=$(head -1 production/stage.txt 2>/dev/null | tr -d '\r' | sed 's/[[:space:]]*$//')
+if [ -e "production/stage.txt" ] || [ -L "production/stage.txt" ]; then
+    if _STAGE_RAW=$(ccgs_safe_read "production/stage.txt" "$CCGS_ROOT" 2>/dev/null); then
+        STAGE_TXT=$(printf '%s\n' "$_STAGE_RAW" | sed -n '1p' | tr -d '\r' \
+            | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    else
+        echo "[!] Ignored linked, redirected, or non-regular production/stage.txt."
+    fi
 fi
+if [ -n "$STAGE_TXT" ] && ! validate_enum_value project.stage "$STAGE_TXT" 2>/dev/null; then
+    echo "[!] Ignored invalid or unsafe production/stage.txt value."
+    STAGE_TXT=""
+fi
+STAGE_YAML=$(printf '%s' "$STAGE_YAML" | ccgs_sanitize_text 40)
+STAGE_TXT=$(printf '%s' "$STAGE_TXT" | ccgs_sanitize_text 40)
 if [ -n "$STAGE_YAML" ] && [ -n "$STAGE_TXT" ] && [ "$STAGE_YAML" != "$STAGE_TXT" ]; then
     echo ""
     echo "[!] Stage sources disagree:"
@@ -126,13 +180,15 @@ fi
 LATEST_SPRINT=$(ls -t production/sprints/sprint-*.md 2>/dev/null | head -1)
 if [ -n "$LATEST_SPRINT" ]; then
     echo ""
-    echo "Active sprint: $(basename "$LATEST_SPRINT" .md)"
+    SPRINT_NAME=$(basename "$LATEST_SPRINT" .md | ccgs_sanitize_text 120)
+    echo "Active sprint: $SPRINT_NAME"
 fi
 
 # Current milestone
 LATEST_MILESTONE=$(ls -t production/milestones/*.md 2>/dev/null | head -1)
 if [ -n "$LATEST_MILESTONE" ]; then
-    echo "Active milestone: $(basename "$LATEST_MILESTONE" .md)"
+    MILESTONE_NAME=$(basename "$LATEST_MILESTONE" .md | ccgs_sanitize_text 120)
+    echo "Active milestone: $MILESTONE_NAME"
 fi
 
 # Open bug count
@@ -164,91 +220,56 @@ if command -v resolve_code_root >/dev/null 2>&1; then
 else
     CODE_ROOT=""
 fi
-if [ -n "$CODE_ROOT" ] && [ -d "$CODE_ROOT" ]; then
-    TODO_COUNT=$(grep -r "TODO" "$CODE_ROOT/" 2>/dev/null | wc -l)
-    FIXME_COUNT=$(grep -r "FIXME" "$CODE_ROOT/" 2>/dev/null | wc -l)
+if [ -n "$CODE_ROOT" ] && [ -L "$CCGS_ROOT/$CODE_ROOT" ]; then
+    echo "[!] Code health scan skipped: $CODE_ROOT is a symbolic link."
+elif [ -n "$CODE_ROOT" ] && [ -d "$CCGS_ROOT/$CODE_ROOT" ]; then
+    if ccgs_resolve_state_python; then
+      HEALTH=$("$_ccgs_state_python" -I - "$CCGS_ROOT/$CODE_ROOT" <<'PY' 2>/dev/null
+import os
+import stat
+import sys
+
+root = sys.argv[1]
+todo = fixme = files = total = 0
+truncated = False
+for current, dirs, names in os.walk(root, followlinks=False):
+    dirs[:] = [name for name in dirs if not os.path.islink(os.path.join(current, name))]
+    for name in names:
+        if files >= 2000 or total >= 8 * 1024 * 1024:
+            truncated = True
+            break
+        path = os.path.join(current, name)
+        try:
+            info = os.lstat(path)
+            if not stat.S_ISREG(info.st_mode) or info.st_size > 1024 * 1024:
+                continue
+            with open(path, "rb") as handle:
+                data = handle.read(min(info.st_size, 1024 * 1024))
+        except OSError:
+            continue
+        files += 1
+        total += len(data)
+        todo += data.count(b"TODO")
+        fixme += data.count(b"FIXME")
+    if truncated:
+        break
+print("%d\t%d\t%d" % (todo, fixme, 1 if truncated else 0))
+PY
+)
+    else
+      HEALTH=$(printf '0\t0\t1')
+    fi
+    TODO_COUNT=$(printf '%s' "$HEALTH" | cut -f1)
+    FIXME_COUNT=$(printf '%s' "$HEALTH" | cut -f2)
+    HEALTH_TRUNCATED=$(printf '%s' "$HEALTH" | cut -f3)
+    TODO_COUNT=${TODO_COUNT:-0}
+    FIXME_COUNT=${FIXME_COUNT:-0}
     if [ "$TODO_COUNT" -gt 0 ] || [ "$FIXME_COUNT" -gt 0 ]; then
         echo ""
-        echo "Code health: ${TODO_COUNT} TODOs, ${FIXME_COUNT} FIXMEs in ${CODE_ROOT}/"
+        SAFE_CODE_ROOT=$(printf '%s' "$CODE_ROOT" | ccgs_sanitize_text 80)
+        echo "Code health: ${TODO_COUNT} TODOs, ${FIXME_COUNT} FIXMEs in ${SAFE_CODE_ROOT}/"
     fi
-fi
-
-# --- Active session state recovery ---
-# Only THIS block is gated by features.session_state, not the whole hook: the
-# sprint/milestone/git context above is not part of the session-state pipeline
-# and a user who turns that pipeline off still wants it. Gating the whole hook
-# (as the original spec's "exit early at the top" wording implies) would take
-# the branch and stage context away with it.
-#
-# Fail OPEN: this hook only sources yaml-helper.sh conditionally, so
-# session_state_enabled may be undefined. An undefined function is falsey, which
-# would silently suppress the recovery checkpoint -- the one piece of output
-# whose absence the user cannot notice. Show the state unless we positively
-# determined the flag is off.
-STATE_FILE="production/session-state/active.md"
-if [ -f "$_CCGS_HOOK_DIR/yaml-helper.sh" ] && ! command -v session_state_enabled >/dev/null 2>&1; then
-    . "$_CCGS_HOOK_DIR/yaml-helper.sh"
-fi
-if command -v ccgs_session_state_path_present >/dev/null 2>&1 \
-    && ccgs_session_state_path_present "$CCGS_ROOT" \
-    && { ! command -v session_state_enabled >/dev/null 2>&1 || session_state_enabled; }; then
-    if STATE_CONTENT=$(ccgs_read_session_state "$CCGS_ROOT"); then
-        echo ""
-        echo "=== ACTIVE SESSION STATE DETECTED ==="
-        echo "A validated checkpoint snapshot was loaded from: $STATE_FILE"
-        echo ""
-    # The CHECKPOINT region -- the same region pre-compact.sh injects.
-    #
-    # Previewing `tail -20` here while pre-compact takes `head -100` would put two
-    # consumers on opposite ends of one file, so which slice you got would
-    # depend on which hook happened to fire. Neither was wrong, because
-    # nothing defined where the recoverable state lived. The schema in
-    # .claude/docs/templates/session-state.md defines it; both read it now.
-        CHECKPOINT=$(printf '%s\n' "$STATE_CONTENT" \
-                     | sed -n '/<!-- CHECKPOINT -->/,/<!-- \/CHECKPOINT -->/p' \
-                     | grep -v '<!-- /\?CHECKPOINT -->')
-        TOTAL_LINES=$(printf '%s' "$STATE_CONTENT" | awk 'END { print NR }')
-    # A sed range whose END address never matches runs to EOF. So a file with an
-    # opening marker and NO closing one produced a non-empty capture of the whole
-    # remaining file and took the healthy branch below -- silently previewing
-    # narrative under a "Checkpoint:" heading, with no warning and no template
-    # named. Emptiness cannot distinguish "no block" from
-    # "unterminated block"; only the markers can, so test them directly.
-    # rotate-session-state.sh already checks the CLOSING marker and refuses.
-    # Two consumers of one region must agree on what malformed means.
-    # `<!-- CHECKPOINT -->` cannot match `<!-- /CHECKPOINT -->` -- the slash sits
-    # where the space would be -- so these two counts are independent.
-        CP_OPEN=$(printf '%s\n' "$STATE_CONTENT" | grep -c '<!-- CHECKPOINT -->' | tr -d ' ')
-        CP_CLOSE=$(printf '%s\n' "$STATE_CONTENT" | grep -c '<!-- /CHECKPOINT -->' | tr -d ' ')
-        if [ "${CP_OPEN:-0}" -gt 0 ] && [ "${CP_CLOSE:-0}" -eq 0 ]; then
-            echo "  [!] CHECKPOINT block is not terminated — no <!-- /CHECKPOINT --> marker."
-            echo "      Not previewing it: without the closing marker the checkpoint"
-            echo "      cannot be told from the narrative, and everything to the end"
-            echo "      of the file would be shown as if it were recoverable state."
-            echo "      Re-create from .claude/docs/templates/session-state.md."
-            echo "  ... ($TOTAL_LINES lines in the validated snapshot)"
-        elif [ -n "$CHECKPOINT" ]; then
-            echo "Checkpoint:"
-            printf '%s\n' "$CHECKPOINT"
-            echo "  ... ($TOTAL_LINES lines in the validated snapshot)"
-        else
-            echo "Quick summary (first 20 lines — no CHECKPOINT block in this file):"
-            printf '%s\n' "$STATE_CONTENT" | head -20
-            echo "  ... ($TOTAL_LINES lines in the validated snapshot)"
-            echo "  NOTE: re-create from .claude/docs/templates/session-state.md so"
-            echo "        recovery reads a bounded checkpoint instead of a slice."
-        fi
-    # Rotation is an OBSERVATION, never an action: helpers in .claude/scripts/
-    # emit observations, never verdicts (CLAUDE.md). The user decides.
-        if [ "${TOTAL_LINES:-0}" -gt 200 ] 2>/dev/null; then
-            echo "  Note: $TOTAL_LINES lines. Narrative can be rotated into"
-            echo "        production/session-logs/ — bash .claude/scripts/rotate-session-state.sh"
-        fi
-        echo "=== END SESSION STATE PREVIEW ==="
-    else
-        echo ""
-        echo "[!] Session state exists but failed security validation; automatic recovery skipped."
-    fi
+    [ "$HEALTH_TRUNCATED" = "1" ] && echo "[!] Code health scan stopped at its 2,000-file or 8 MiB budget."
 fi
 
 # --- engine reference vs configured engine -----------------------------------

@@ -3,7 +3,7 @@ name: create-epics
 description: "Turn GDDs plus architecture into epics — one per architectural module, with untraced requirements. Then /create-stories [epic-slug]."
 argument-hint: "[system-name | layer: foundation|core|feature|presentation | all] [--review full|lean|solo]"
 user-invocable: true
-allowed-tools: Read, Glob, Grep, Write, Agent, AskUserQuestion, Bash(bash "*/.claude/skills/create-epics/../../hooks/yaml-helper.sh" resolve_config *)
+allowed-tools: Read, Glob, Grep, Write, Agent, AskUserQuestion, Bash(bash "${CLAUDE_SKILL_DIR}/../../hooks/yaml-helper.sh" resolve_config --keys review_mode,automation,workflow,docs.density,story_granularity,system_overrides)
 model: sonnet
 ---
 
@@ -155,7 +155,7 @@ Report: "Loaded [N] GDDs, [M] ADRs, engine: [name + version]."
 >   acceptance criteria. Do not require GDDs, ADRs, the TR registry, or the
 >   manifest; skip the untraced-requirement gate. If run, the epic is still
 >   produced — but note `/create-stories` also synthesizes one from the brief when
->   this skill is skipped (the default `minimal` path).
+>   this skill is skipped (the `minimal` path).
 
 ---
 

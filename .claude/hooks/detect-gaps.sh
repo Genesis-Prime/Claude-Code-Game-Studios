@@ -5,6 +5,7 @@ _CCGS_HOOK_DIR="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && 
 [ -n "$_CCGS_HOOK_DIR" ] || exit 0
 . "$_CCGS_HOOK_DIR/trusted-root.sh" 2>/dev/null || exit 0
 ccgs_bootstrap_trusted_root "$_CCGS_HOOK_DIR/../.." || exit 0
+. "$_CCGS_HOOK_DIR/path-security.sh" 2>/dev/null || exit 0
 
 # Hook: detect-gaps.sh
 # Event: SessionStart
@@ -195,20 +196,17 @@ fi
 
 # --- Check 2: Prototypes without documentation ---
 if [ -d "prototypes" ]; then
-  PROTOTYPE_DIRS=$(find prototypes -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
   UNDOCUMENTED_PROTOS=()
-
-  if [ -n "$PROTOTYPE_DIRS" ]; then
-    while IFS= read -r proto_dir; do
+    while IFS= read -r -d '' proto_dir; do
       # Normalize path separators for Windows
       proto_dir=$(echo "$proto_dir" | sed 's|\\|/|g')
 
       # Check for README.md or CONCEPT.md
       if [ ! -f "${proto_dir}/README.md" ] && [ ! -f "${proto_dir}/CONCEPT.md" ]; then
-        proto_name=$(basename "$proto_dir")
+        proto_name=$(basename "$proto_dir" | ccgs_sanitize_text 100)
         UNDOCUMENTED_PROTOS+=("$proto_name")
       fi
-    done <<< "$PROTOTYPE_DIRS"
+    done < <(find prototypes -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
 
     if [ ${#UNDOCUMENTED_PROTOS[@]} -gt 0 ]; then
       echo "⚠️  GAP: ${#UNDOCUMENTED_PROTOS[@]} undocumented prototype(s) found:"
@@ -217,7 +215,6 @@ if [ -d "prototypes" ]; then
       done
       echo "    Suggested action: /reverse-document concept prototypes/[name]"
     fi
-  fi
 fi
 
 # --- Check 3: Core systems without architecture docs ---
@@ -239,12 +236,9 @@ fi
 # --- Check 4: Gameplay systems without design docs ---
 if [ "$DOC_CHECKS" = true ] && [ -n "$CODE_ROOT" ] && [ -d "$CODE_ROOT/gameplay" ]; then
   # Find major gameplay subdirectories (those with 5+ files)
-  GAMEPLAY_SYSTEMS=$(find "$CODE_ROOT/gameplay" -mindepth 1 -maxdepth 1 -type d 2>/dev/null)
-
-  if [ -n "$GAMEPLAY_SYSTEMS" ]; then
-    while IFS= read -r system_dir; do
+    while IFS= read -r -d '' system_dir; do
       system_dir=$(echo "$system_dir" | sed 's|\\|/|g')
-      system_name=$(basename "$system_dir")
+      system_name=$(basename "$system_dir" | ccgs_sanitize_text 100)
       file_count=$(find "$system_dir" -type f 2>/dev/null | wc -l)
       file_count=$(echo "$file_count" | tr -d ' ')
 
@@ -260,8 +254,7 @@ if [ "$DOC_CHECKS" = true ] && [ -n "$CODE_ROOT" ] && [ -d "$CODE_ROOT/gameplay"
           echo "    Suggested action: /reverse-document design $CODE_ROOT/gameplay/$system_name"
         fi
       fi
-    done <<< "$GAMEPLAY_SYSTEMS"
-  fi
+    done < <(find "$CODE_ROOT/gameplay" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
 fi
 
 # --- Check 5: Production planning ---
@@ -286,10 +279,14 @@ fi
 # the skill that resolves it.
 STAGE=""
 if [ -f "$_CCGS_HOOK_DIR/yaml-helper.sh" ]; then
-    STAGE=$(get_yaml_key project.stage 2>/dev/null)
+    STAGE=$(get_yaml_key "$CCGS_ROOT/project.yaml" project.stage 2>/dev/null)
 fi
-[ -z "$STAGE" ] && [ -f production/stage.txt ] && STAGE=$(head -1 production/stage.txt 2>/dev/null | tr -d '
-' | tr -d ' ')
+if [ -z "$STAGE" ]; then
+    STAGE=$(ccgs_safe_read "production/stage.txt" "$CCGS_ROOT" 2>/dev/null \
+        | sed -n '1p' | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+fi
+if [ -n "$STAGE" ] && ! validate_enum_value project.stage "$STAGE" 2>/dev/null; then STAGE=""; fi
+STAGE=$(printf '%s' "$STAGE" | ccgs_sanitize_text 40)
 
 if [ -n "$STAGE" ]; then
     STORY_COUNT=$(find production/epics -name "story-*.md" 2>/dev/null | wc -l | tr -d ' ')

@@ -5,6 +5,7 @@ _CCGS_HOOK_DIR="$(CDPATH= cd -- "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && 
 [ -n "$_CCGS_HOOK_DIR" ] || exit 0
 . "$_CCGS_HOOK_DIR/trusted-root.sh" 2>/dev/null || exit 0
 ccgs_bootstrap_trusted_root "$_CCGS_HOOK_DIR/../.." || exit 0
+. "$_CCGS_HOOK_DIR/path-security.sh" 2>/dev/null || exit 0
 
 # Notification hook — fires when Claude Code sends a notification
 # Shows a Windows toast via PowerShell
@@ -31,7 +32,7 @@ fi
 # Keep notification text out of PowerShell source. PowerShell accepts Unicode
 # smart quotes as string delimiters, so ASCII apostrophe escaping is not a
 # sufficient cross-language boundary. Pass the text as environment data.
-MESSAGE_DISPLAY=$(printf '%s' "$MESSAGE" | head -c 200)
+MESSAGE_DISPLAY=$(printf '%s' "$MESSAGE" | ccgs_sanitize_text 200)
 
 # Show Windows balloon tip notification (works on all Windows 10/11 without extra modules)
 CCGS_NOTIFICATION_MESSAGE="$MESSAGE_DISPLAY" \

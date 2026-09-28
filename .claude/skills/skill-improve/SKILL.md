@@ -3,7 +3,7 @@ name: skill-improve
 description: "Improve a skill via a test-fix-retest loop — static checks, targeted fixes, keep or revert on score change."
 argument-hint: "[skill-name]"
 user-invocable: true
-allowed-tools: Read, Glob, Grep, Write, Bash, Bash(bash "*/.claude/skills/skill-improve/../../hooks/yaml-helper.sh" resolve_config *)
+allowed-tools: Read, Glob, Grep, Write, Bash(bash "${CLAUDE_SKILL_DIR}/../../hooks/yaml-helper.sh" resolve_config --keys automation)
 model: sonnet
 ---
 
@@ -103,8 +103,12 @@ Show the full combined diagnosis to the user before proposing any changes.
 ## Phase 4: Propose Fix
 
 Write a targeted fix for each failure and warning. Show the proposed changes
-as clearly marked before/after blocks. Only change what is failing — do not
+as an exact diff. Only change what is failing — do not
 rewrite sections that are passing.
+
+If the diff changes `allowed-tools`, call that out separately. Never add or
+widen an `allowed-tools` grant unless the user explicitly approves that exact
+grant after seeing the diff.
 
 Ask: "May I write this improved version to `.claude/skills/[name]/SKILL.md`?"
 

@@ -53,6 +53,19 @@ fi
 
 echo "=== Skill Modified: $SKILL_NAME ===" >&2
 echo "Run /skill-test static $SKILL_NAME to validate structural compliance." >&2
+REL_PATH=".claude/skills/${FILE_PATH#*.claude/skills/}"
+case "$REL_PATH" in
+  *'/../'*|../*|*/..) ;;
+  *)
+    if git -C "$CCGS_ROOT" diff -- "$REL_PATH" 2>/dev/null \
+        | grep -qE '^[+-]allowed-tools:' \
+      || { [ -f "$CCGS_ROOT/$REL_PATH" ] \
+           && ! git -C "$CCGS_ROOT" ls-files --error-unmatch -- "$REL_PATH" >/dev/null 2>&1 \
+           && sed -n '1,/^---$/p' "$CCGS_ROOT/$REL_PATH" | grep -q '^allowed-tools:'; }; then
+      echo "!!! SECURITY REVIEW REQUIRED: allowed-tools changed. Do not widen tool grants without explicit user approval. !!!" >&2
+    fi
+    ;;
+esac
 echo "====================================" >&2
 
 exit 0

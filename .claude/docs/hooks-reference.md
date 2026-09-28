@@ -4,7 +4,7 @@ Hooks are configured in `.claude/settings.json` and fire automatically:
 
 | Hook | Event | Trigger | Action |
 | ---- | ----- | ------- | ------ |
-| `validate-commit.sh` | PreToolUse (Bash) | Classified `git commit` commands | Validates exact index blobs for design sections, JSON data, hardcoded values, and TODO format |
+| `validate-commit.sh` | PreToolUse (Bash) | Classified Git commit creators | Validates exact staged blobs for literal `commit`; asks before `merge`, `cherry-pick`, `revert`, `am`, `rebase`, `commit-tree`, and `update-ref`, whose result cannot be fully staged-validated |
 | `validate-push.sh` | PreToolUse (Bash) | Classified `git push` commands | Warns on pushes affecting protected branches (develop/main/master), including full refspecs |
 | `validate-agent.sh` | PreToolUse (Agent/Task) | Agent requests | Blocks agent types outside the reviewed framework roster |
 | `validate-assets.sh` | PostToolUse (Write/Edit) | Asset file changes | Checks naming conventions and JSON validity for files in `assets/` |
@@ -16,7 +16,7 @@ Hooks are configured in `.claude/settings.json` and fire automatically:
 | `session-stop.sh` | Stop | **Every response ends** — not once per session | Summarizes accomplishments, updates session log, and writes the subagent spawn tally to `production/session-logs/session-cost.md`. Archives a validated snapshot of `active.md` only when its content hash changed. |
 | `log-agent.sh` | SubagentStart | Agent spawned | Audit trail start — logs subagent invocation with timestamp and session id |
 | `log-agent-stop.sh` | SubagentStop | Agent stops | Audit trail stop — completes subagent record |
-| `validate-skill-change.sh` | PostToolUse (Write/Edit) | Skill file changes | Advises running `/skill-test` after any `.claude/skills/` file is written or edited |
+| `validate-skill-change.sh` | PostToolUse (Write/Edit) | Skill file changes | Advises running `/skill-test` and emits a prominent security warning when `allowed-tools` changes |
 
 `path-security.sh` and `read-session-state.py` form the shared checkpoint read
 boundary used by SessionStart, PreCompact, PostCompact, Stop, and the status
@@ -26,13 +26,27 @@ during the read, and NUL bytes. Callers use the bytes read from one validated
 descriptor and never reopen `active.md`.
 Without Python 3 isolated mode, automatic checkpoint consumption fails closed.
 
-Automatic append, replace, read, and directory-creation operations use
+Checkpoint output is refused when `active.md` is tracked, strips terminal
+controls, is capped at 150 lines and about 8 KiB, and is wrapped in a fence that
+labels it as saved project notes rather than instructions. SessionStart emits
+that bounded checkpoint before code-health scanning. The scan refuses a linked
+code root and stops after 2,000 files or 8 MiB.
+
+Legacy `production/stage.txt` and `production/review-mode.txt` reads use the
+same authenticated file boundary, validate the resulting enum, and drop linked,
+redirected, or invalid values. Terminal and audit strings pass through the
+shared control-character sanitizer before output.
+
+Automatic append, replace, read, delete, and directory-creation operations use
 handle-relative traversal and parent-directory locks. Python does not expose
 that primitive on native Windows, so `secure-file.py` refuses those operations
 there and the calling hook emits a diagnostic instead of falling back to a
 path-based write that could race a junction swap. The separate validated
 checkpoint reader remains available; persistent session and audit log updates
 require a POSIX platform until a native Windows handle implementation lands.
+Maintenance scripts use the same fail-closed writer for migration replacements
+and session archive appends, so native Windows reports the unsupported write
+instead of falling back to a race-prone path operation.
 
 ### Subagent cost visibility
 

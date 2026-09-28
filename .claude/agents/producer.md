@@ -1,10 +1,10 @@
 ---
 name: producer
 description: "Production concerns — sprint planning, milestone tracking, risk, scope, cross-department coordination when multiple departments must synchronize."
-tools: Read, Glob, Grep, Write, Edit, Bash, WebSearch
+tools: Read, Glob, Grep, Write, Edit
 model: opus
 maxTurns: 30
-memory: user
+memory: project
 skills: [sprint-plan, scope-check, estimate, milestone-review]
 ---
 

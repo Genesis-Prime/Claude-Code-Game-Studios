@@ -23,18 +23,8 @@ echo "=== Context Restored After Compaction ==="
 
 if command -v ccgs_session_state_path_present >/dev/null 2>&1 \
     && ccgs_session_state_path_present "$CCGS_ROOT"; then
-  if STATE_CONTENT=$(ccgs_read_session_state "$CCGS_ROOT"); then
-    SIZE=$(printf '%s' "$STATE_CONTENT" | awk 'END { print NR }')
-    CHECKPOINT=$(printf '%s\n' "$STATE_CONTENT" \
-                 | sed -n '/<!-- CHECKPOINT -->/,/<!-- \/CHECKPOINT -->/p' \
-                 | grep -v '<!-- /\?CHECKPOINT -->')
-    echo "Validated session checkpoint: $ACTIVE ($SIZE lines)"
-    if [ -n "$CHECKPOINT" ]; then
-      printf '%s\n' "$CHECKPOINT"
-    else
-      echo "No CHECKPOINT block found; showing the first 20 validated lines:"
-      printf '%s\n' "$STATE_CONTENT" | head -20
-    fi
+  if ccgs_emit_checkpoint "$CCGS_ROOT"; then
+    echo "Validated bounded checkpoint from $ACTIVE."
   else
     echo "Session state exists but failed security validation; automatic recovery skipped."
   fi

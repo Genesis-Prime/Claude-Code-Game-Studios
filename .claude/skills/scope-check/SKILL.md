@@ -3,7 +3,7 @@ name: scope-check
 description: "Scope creep check — current scope versus the original plan. Flags additions, quantifies bloat, recommends cuts. 'Any scope creep?'"
 argument-hint: "[feature-name or sprint-N]"
 user-invocable: true
-allowed-tools: Read, Glob, Grep, Bash
+allowed-tools: Read, Glob, Grep
 model: haiku
 ---
 

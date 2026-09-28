@@ -14,6 +14,7 @@ Or check `README.md` for the version badge.
 ## Table of Contents
 
 - [Upgrade Strategies](#upgrade-strategies)
+- [Security hardening update](#security-hardening-update)
 - [v1.1.0 → v1.1.1](#v110--v111)
 - [v1.0 → v1.1](#v10--v11)
 - [v1.0.0-beta → v1.0](#v100-beta--v10)
@@ -160,6 +161,33 @@ Best when: you didn't use git to set up the template (just downloaded a zip).
 2. Copy the files listed under **"Safe to overwrite"** directly.
 3. For files under **"Merge carefully"**, open both versions side-by-side
    and manually merge the structural changes while keeping your content.
+
+---
+
+## Security hardening update
+
+This update restores `standard` as the built-in `modes.rigor` floor and stops a
+committed `project.yaml` from loosening automation, review, rigor, workflow,
+QA, test strictness, or performance enforcement for every clone. Move an
+intentional lightweight choice to the gitignored local file, for example:
+
+```yaml
+# project.local.yaml
+modes:
+  rigor: minimal
+  automation: autonomous
+```
+
+The three director agents now use `memory: project`. If you maintain customized
+copies of `producer.md`, `technical-director.md`, or `creative-director.md`,
+change any `memory: user` entry to `memory: project` so notes from one game are
+not loaded into another.
+
+Merge `.claude/settings.json` carefully. The new project `ask` rules override
+local allow rules for framework edits, network clients, inline interpreter
+code, and typed project-command runs. New CI entry points are
+`tests/security-regression-config.sh`, `tests/security-regression-hooks.sh`, and
+`tests/prompt-layer-lint.sh`.
 
 ---
 
@@ -736,7 +764,9 @@ Four new hooks are registered in this version. If you haven't customized `settin
 
 #### Customized agent files
 
-If you've added project-specific knowledge to agent `.md` files, do a diff and manually add the `memory: project` line to the YAML frontmatter where appropriate. Creative and technical director agents intentionally keep `memory: user` — only specialist agents get `memory: project`.
+If you've added project-specific knowledge to agent `.md` files, do a diff and
+manually add the `memory: project` line to the YAML frontmatter where
+appropriate. All directors and specialists use project-scoped memory.
 
 ---
 

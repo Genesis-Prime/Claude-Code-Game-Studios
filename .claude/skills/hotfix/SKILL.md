@@ -4,7 +4,7 @@ description: "Emergency fix bypassing normal sprint process — hotfix branch, a
 argument-hint: "[bug-id or description]"
 user-invocable: true
 disable-model-invocation: true
-allowed-tools: Read, Glob, Grep, Write, Edit, Bash, Agent, AskUserQuestion
+allowed-tools: Read, Glob, Grep, Write, Edit, Agent, AskUserQuestion
 model: sonnet
 ---
 
@@ -69,6 +69,13 @@ If yes, write the file, creating the directory if needed.
 
 ## Phase 3: Create Hotfix Branch
 
+Derive `[short-name]` from the bug description, lowercase it, and validate it
+against `^[a-z0-9._/-]+$`. Validate the full branch with
+`git check-ref-format --branch "hotfix/[short-name]"`. If either check fails,
+ask the user for a safe branch name and do not run Git until it passes. Treat
+the base ref as untrusted data and verify it resolves to a commit before branch
+creation.
+
 Check whether this is a git repository:
 
 `Bash: git rev-parse --is-inside-work-tree 2>/dev/null`
@@ -82,7 +89,10 @@ If the check passes, use `AskUserQuestion` before creating the branch:
   - `[B] Use a different base ref — I'll specify it`
   - `[C] Skip — I'll create the branch myself`
 
-Only run `git checkout -b hotfix/[short-name] [base-ref]` if user selects [A]. If [B]: ask the user for the base ref, then run the command with that ref. If [C]: skip branch creation and proceed to Phase 4.
+Only run `git switch -c "hotfix/[validated-short-name]" -- "[validated-base-ref]"`
+if the user selects [A]. If [B]: ask the user for the base ref, validate it,
+then run the same command. The `--` separator is required. If [C]: skip branch
+creation and proceed to Phase 4.
 
 ---
 

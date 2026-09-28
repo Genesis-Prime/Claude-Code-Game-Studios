@@ -17,6 +17,10 @@ GLOBAL_VALUE_OPTIONS = {
     "--super-prefix", "--config-env", "--exec-path",
 }
 PROTECTED = {"main", "master", "develop"}
+COMMIT_CREATING = {
+    "commit", "merge", "cherry-pick", "revert", "am", "rebase",
+    "commit-tree", "update-ref",
+}
 
 
 class ClassificationError(Exception):
@@ -225,31 +229,37 @@ def _context_safe(root, global_args, environment):
     return os.path.normcase(current) == expected
 
 
+def _target_matches(subcommand, target):
+    if target == "commit":
+        return subcommand in COMMIT_CREATING
+    return subcommand == target
+
+
 def _alias_result(root, subcommand, args, target, global_args, environment, seen=None):
     seen = set() if seen is None else seen
     if subcommand in seen or len(seen) >= 8:
-        return "ambiguous", [], global_args, environment
+        return "ambiguous", "", [], global_args, environment
     if not _alias_environment_safe(environment) or _has_global_option(global_args, "--config-env"):
-        return "ambiguous", [], global_args, environment
+        return "ambiguous", "", [], global_args, environment
     value = _configured_alias(root, subcommand, global_args)
     if value is None:
-        return "other", [], global_args, environment
+        return "other", "", [], global_args, environment
     if value.startswith("!"):
-        return "ambiguous", [], global_args, environment
+        return "ambiguous", "", [], global_args, environment
     try:
         expansion = shlex.split(value, posix=True)
     except ValueError:
-        return "ambiguous", [], global_args, environment
+        return "ambiguous", "", [], global_args, environment
     parsed = _git_subcommand(["git"] + expansion + args)
     if parsed is None:
-        return "ambiguous", [], global_args, environment
+        return "ambiguous", "", [], global_args, environment
     expanded_subcommand, expanded_args, _, expanded_globals, expanded_environment = parsed
     combined_globals = global_args + expanded_globals
     combined_environment = environment.union(expanded_environment)
-    if expanded_subcommand == target:
-        return "target", expanded_args, combined_globals, combined_environment
+    if _target_matches(expanded_subcommand, target):
+        return "target", expanded_subcommand, expanded_args, combined_globals, combined_environment
     if expanded_subcommand in ("ambiguous", "dangerous_alias"):
-        return "ambiguous", [], combined_globals, combined_environment
+        return "ambiguous", "", [], combined_globals, combined_environment
     seen.add(subcommand)
     return _alias_result(
         root, expanded_subcommand, expanded_args, target,
@@ -271,26 +281,29 @@ def _invocations(command, target, root):
             unclassified.append(" ".join(segment))
             continue
         subcommand, args, raw, global_args, environment = parsed
-        if subcommand == target:
+        if _target_matches(subcommand, target):
             if cwd_changed or not _context_safe(root, global_args, environment):
                 force_ambiguous = True
             else:
-                found.append((args, raw, global_args))
+                found.append((subcommand, args, raw, global_args))
         elif subcommand in ("ambiguous", "dangerous_alias"):
             unclassified.append(" ".join(raw))
             force_ambiguous = force_ambiguous or subcommand == "dangerous_alias"
         else:
-            alias_result, alias_args, alias_globals, alias_environment = _alias_result(
+            alias_result, alias_subcommand, alias_args, alias_globals, alias_environment = _alias_result(
                 root, subcommand, args, target, global_args, environment,
             )
             if alias_result == "target":
                 if cwd_changed or not _context_safe(root, alias_globals, alias_environment):
                     force_ambiguous = True
                 else:
-                    found.append((alias_args, raw, alias_globals))
+                    found.append((alias_subcommand, alias_args, raw, alias_globals))
             elif alias_result == "ambiguous":
                 force_ambiguous = True
-    probe = re.compile(r"\bgit(?:\.exe)?\b.*\b{}\b".format(re.escape(target)), re.I | re.S)
+    probe_target = "(?:{})".format("|".join(
+        re.escape(item) for item in sorted(COMMIT_CREATING, key=len, reverse=True)
+    )) if target == "commit" else re.escape(target)
+    probe = re.compile(r"\bgit(?:\.exe)?\b.*\b{}\b".format(probe_target), re.I | re.S)
     ambiguous = not found and (force_ambiguous or bool(probe.search("\n".join(unclassified))))
     return found, ambiguous
 
@@ -441,12 +454,20 @@ def main():
         return 2
     if not found:
         return 1
-    if target == "commit" and any(_commit_uses_worktree(args) for args, _, _ in found):
+    if target == "commit" and any(
+            subcommand == "commit" and _commit_uses_worktree(args)
+            for subcommand, args, _, _ in found):
         sys.stderr.write("git-command-security: commit options may read unvalidated worktree bytes\n")
         return 2
+    if target == "commit" and any(subcommand != "commit" for subcommand, _, _, _ in found):
+        names = sorted({subcommand for subcommand, _, _, _ in found if subcommand != "commit"})
+        sys.stdout.write(",".join(names))
+        if any(subcommand == "commit" for subcommand, _, _, _ in found):
+            return 4
+        return 3
     if target == "push":
         protected = ""
-        for args, _, global_args in found:
+        for _, args, _, global_args in found:
             protected = _protected_push(args, root, global_args)
             if protected:
                 break
