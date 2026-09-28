@@ -98,7 +98,15 @@ assert_contains "$review_output" "Review mode: lean" "SessionStart let legacy re
 assert_not_contains "$review_output" "Review mode: solo" "SessionStart consulted legacy review mode with project.yaml present"
 rm -f "$project/project.yaml"
 legacy_review_output=$(cd "$project" && CLAUDE_PROJECT_DIR="$project" "$test_bash" .claude/hooks/session-start.sh 2>&1)
-assert_contains "$legacy_review_output" "Review mode: solo" "legacy-only review mode no longer resolves"
+case "$legacy_review_output" in
+  *"Ignored linked, redirected, or non-regular production/review-mode.txt"*)
+    assert_contains "$legacy_review_output" "Review mode: lean" "rejected legacy review mode did not use the safe default"
+    assert_not_contains "$legacy_review_output" "Review mode: solo" "rejected legacy review mode still reached SessionStart"
+    ;;
+  *)
+    assert_contains "$legacy_review_output" "Review mode: solo" "readable legacy-only review mode no longer resolves"
+    ;;
+esac
 rm -f "$project/production/review-mode.txt"
 
 # F8b: the checkpoint reaches output before bounded code health scanning, and a
