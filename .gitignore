@@ -17,6 +17,9 @@ production/session-logs/
 # Ephemeral per-session checkpoint. directory-structure.md documents this as
 # gitignored; the rule was missing, so active.md would have been committed.
 production/session-state/
+# /skill-test spec output. The testing framework's CLAUDE.md and README.md
+# document this as gitignored; the rule was missing.
+CCGS Skill Testing Framework/results/
 .scratch/
 # Per-agent working memory written at runtime — not release material
 .claude/agent-memory/
