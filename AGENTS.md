@@ -52,7 +52,7 @@ bash tests/security-regression-hooks.sh
 bash tests/prompt-layer-lint.sh
 ```
 
-CI runs Python 3.9 as `python`; locally that may be `python3`. Inside Claude Code the `python -I -c` line triggers an `ask` prompt by design. The test scripts need bash, git and Python 3 with `-I`. The three regression scripts copy `.claude/` into a `mktemp` directory and delete it on exit; the lint only reads. Skill checks (`/skill-test static|spec|category|audit`, `/skill-improve`) are Claude Code slash commands and cannot run from other tools.
+CI runs Python 3.9 as `python`; locally that may be `python3`. Whether Claude Code's permission rules catch the `python -I -c` line is unverified: `.claude/settings.json` asks for `Bash(python -c *)` and `Bash(python3 -c *)`, which may not match the `-I` form. Inside Claude Code, ask Michael before running it. The test scripts need bash, git and Python 3 with `-I`. The three regression scripts copy `.claude/` into a `mktemp` directory and delete it on exit; the lint only reads. Skill checks (`/skill-test static|spec|category|audit`, `/skill-improve`) are Claude Code slash commands and cannot run from other tools.
 
 ## Before you call work done
 
