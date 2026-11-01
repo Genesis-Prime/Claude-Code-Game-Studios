@@ -60,6 +60,12 @@ existing project on the older config files.
 - `CCGS Skill Testing Framework/results/` is now actually gitignored, as its
   docs already said.
 
+### Fixed
+
+- The Linux CI job runs on `ubuntu-24.04`. GitHub moved `ubuntu-latest` to
+  Ubuntu 26.04 on 2026-10-19, which has no Python 3.9, so the job failed at
+  setup. The prompt-layer lint now requires the pinned label.
+
 ---
 
 ## [1.1.1] — 2026-09-24

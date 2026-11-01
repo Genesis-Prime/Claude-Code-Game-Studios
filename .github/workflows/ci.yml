@@ -19,7 +19,8 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest
+          # ubuntu-latest moved to Ubuntu 26.04 on 2026-10-19 and has no Python 3.9.
+          - ubuntu-24.04
           - macos-latest
           - windows-latest
 
