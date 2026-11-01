@@ -185,7 +185,7 @@ if not re.search(r'package-ecosystem:\s*["\']?github-actions["\']?', dependabot)
 
 ci = (root / ".github/workflows/ci.yml").read_text(encoding="utf-8")
 for required in (
-    "ubuntu-latest", "macos-latest", "windows-latest",
+    "ubuntu-24.04", "macos-latest", "windows-latest",
     "bash tests/security-regression.sh",
     "bash tests/security-regression-config.sh",
     "bash tests/security-regression-hooks.sh",

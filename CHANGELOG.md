@@ -49,6 +49,23 @@ existing project on the older config files.
 - Repository CI now runs shell syntax checks and the security regression suite
   on Windows, macOS, and Linux for every pull request and push to `main`.
 
+### Documentation
+
+- Python 3 with isolated mode is now listed as required. Without it the
+  commit, push and agent validation hooks block every shell command and
+  subagent spawn; `.claude/docs/setup-requirements.md` and the README no
+  longer say those checks are skipped when `jq` is missing.
+- Hook and rule counts in the README, workflow guide, quick start and rules
+  reference match the tree (13 wired hooks, 14 rule files).
+- `CCGS Skill Testing Framework/results/` is now actually gitignored, as its
+  docs already said.
+
+### Fixed
+
+- The Linux CI job runs on `ubuntu-24.04`. GitHub moved `ubuntu-latest` to
+  Ubuntu 26.04 on 2026-10-19, which has no Python 3.9, so the job failed at
+  setup. The prompt-layer lint now requires the pinned label.
+
 ---
 
 ## [1.1.1] — 2026-09-24
