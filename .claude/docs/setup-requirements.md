@@ -1,8 +1,11 @@
 # Setup Requirements
 
 This template requires a few tools to be installed for full functionality.
-All hooks fail gracefully if tools are missing — nothing will break, but
-you'll lose validation features.
+Most hooks fail gracefully if tools are missing: nothing breaks, but you lose
+validation features. The exception is Python 3: the commit, push and agent
+validation hooks block (exit 2) without it rather than let an unvalidated
+command through, and the commit and push hooks run on every Bash tool call,
+so without Python Claude Code cannot run any shell command in this project.
 
 ## Required
 
@@ -10,13 +13,13 @@ you'll lose validation features.
 | ---- | ---- | ---- |
 | **Git** | Version control, branch management | [git-scm.com](https://git-scm.com/) |
 | **Claude Code** | AI agent CLI | `npm install -g @anthropic-ai/claude-code` |
+| **Python 3 with `-I` isolated mode** | Commit, push and agent validation (these hooks block without it), config parsing, JSON validation, secure log writes, and session checkpoint snapshots | [python.org](https://www.python.org/) |
 
 ## Recommended
 
 | Tool | Used By | Purpose | Install |
 | ---- | ---- | ---- | ---- |
-| **jq** | Hooks (7 of 12) | JSON parsing in commit/push/asset/agent hooks | See below |
-| **Python 3 with `-I` isolated mode** | Hooks and config helpers | Safe config parsing, JSON validation, and session checkpoint snapshots | [python.org](https://www.python.org/) |
+| **jq** | Hooks (6 of 13) | Exact JSON parsing of hook input in the asset, skill-change, agent-audit, notification and session-stop hooks; each falls back to `grep` without it | See below |
 | **Bash** | All hooks | Shell script execution | Included with Git for Windows |
 
 ### Installing jq
@@ -51,7 +54,7 @@ sudo pacman -S jq       # Arch
 
 ### macOS / Linux
 - Bash is available natively
-- Install `jq` via your package manager for full hook support
+- Install `jq` via your package manager for exact hook input parsing
 
 ## Verifying Your Setup
 
@@ -61,16 +64,16 @@ Run these commands to check prerequisites:
 git --version          # Should show git version
 bash --version         # Should show bash version
 jq --version           # Should show jq version (optional)
-python3 --version      # Should show python version (optional)
+python3 --version      # Should show Python 3 (required for commit, push and agent validation)
 ```
 
 ## What Happens Without Optional Tools
 
 | Missing Tool | Effect |
 | ---- | ---- |
-| **jq** | Commit validation, push protection, asset validation, and agent audit hooks silently skip their checks. Commits and pushes still work. |
-| **Python 3 with `-I`** | Config parsing and JSON validation report that they could not run. Automatic session checkpoint previews and archives are skipped rather than reading an untrusted path. |
-| **Both** | All hooks still execute without error (exit 0) but provide no validation. You're flying without safety nets. |
+| **jq** | No check is skipped. The six hooks that use jq read their input with a `grep` fallback instead, which is less exact on unusual paths. Commit, push and agent validation do not use jq. |
+| **Python 3 with `-I`** | `validate-commit.sh`, `validate-push.sh` and `validate-agent.sh` print `BLOCKED: Python 3 isolated mode is required ...` and exit 2. The first two run on every Bash tool call, so every shell command (not only `git commit` and `git push`) is refused, and the third refuses every subagent spawn, until Python is installed. Asset JSON validation warns that the file was not checked. Agent audit log writes fail with a message. Config parsing reports that it could not run. Automatic session checkpoint previews and archives are skipped rather than reading an untrusted path. |
+| **Both** | As without Python: shell commands and subagent spawns are blocked; the other hooks exit 0 with reduced or no validation. |
 
 ## Optional Performance Settings
 
