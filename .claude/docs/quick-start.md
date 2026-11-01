@@ -270,8 +270,8 @@ project.yaml                       -- Machine-readable project config (engine, m
   settings.json                    -- Claude Code hooks and project settings
   agents/                          -- 49 agent definitions (YAML frontmatter)
   skills/                          -- 74 slash command definitions (YAML frontmatter)
-  hooks/                           -- 12 event hooks (.sh, wired by settings.json) + yaml-helper.sh
-  rules/                           -- 11 path-specific rule files
+  hooks/                           -- 13 event hooks (.sh, wired by settings.json) + shared helpers
+  rules/                           -- 14 rule files (13 path-specific, 1 always loaded)
   docs/
     quick-start.md                 -- This file
     technical-preferences.md       -- Legacy fallback for project.yaml config (mirror; see project.yaml at repo root)

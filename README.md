@@ -12,8 +12,8 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
   <a href=".claude/agents"><img src="https://img.shields.io/badge/agents-49-blueviolet" alt="49 Agents"></a>
   <a href=".claude/skills"><img src="https://img.shields.io/badge/skills-74-green" alt="74 Skills"></a>
-  <a href=".claude/hooks"><img src="https://img.shields.io/badge/hooks-12-orange" alt="12 Hooks"></a>
-  <a href=".claude/rules"><img src="https://img.shields.io/badge/rules-13-red" alt="13 Rules"></a>
+  <a href=".claude/hooks"><img src="https://img.shields.io/badge/hooks-13-orange" alt="13 Hooks"></a>
+  <a href=".claude/rules"><img src="https://img.shields.io/badge/rules-14-red" alt="14 Rules"></a>
   <a href="https://docs.anthropic.com/en/docs/claude-code"><img src="https://img.shields.io/badge/built%20for-Claude%20Code-f5f5f5?logo=anthropic" alt="Built for Claude Code"></a>
   <a href="https://www.buymeacoffee.com/donchitos3"><img src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-Support%20this%20project-FFDD00?logo=buymeacoffee&logoColor=black" alt="Buy Me a Coffee"></a>
   <a href="https://github.com/sponsors/Donchitos"><img src="https://img.shields.io/badge/GitHub%20Sponsors-Support%20this%20project-ea4aaa?logo=githubsponsors&logoColor=white" alt="GitHub Sponsors"></a>
@@ -57,8 +57,8 @@ The result: you still make every decision, but now you have a team that asks the
 |----------|-------|-------------|
 | **Agents** | 49 | Specialized subagents across design, programming, art, audio, narrative, QA, and production |
 | **Skills** | 74 | Slash commands for every workflow phase (`/start`, `/design-system`, `/create-epics`, `/create-stories`, `/dev-story`, `/story-done`, etc.) |
-| **Hooks** | 12 | Automated validation on commits, pushes, asset changes, session lifecycle, agent audit trail, and gap detection |
-| **Rules** | 13 | Path-scoped coding standards enforced when editing gameplay, engine, AI, UI, network code, and more |
+| **Hooks** | 13 | Automated validation on commits, pushes, agent spawns, asset changes, skill edits, session lifecycle, agent audit trail, and gap detection |
+| **Rules** | 14 | Path-scoped coding standards for gameplay, engine, AI, UI, network code and more, plus one always-loaded repository-content safety rule |
 | **Templates** | 39 | Document templates for GDDs, UX specs, ADRs, sprint plans, HUD design, accessibility, and more |
 
 ## Studio Hierarchy
@@ -175,9 +175,10 @@ clutter, not evidence.
 
 - [Git](https://git-scm.com/)
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`npm install -g @anthropic-ai/claude-code`)
-- **Recommended**: [jq](https://jqlang.github.io/jq/) (for hook validation) and Python 3 (for JSON validation)
+- Python 3 with `-I` isolated mode: required. Without it the commit, push and agent validation hooks block every shell command and subagent spawn (see `.claude/docs/setup-requirements.md`).
+- **Recommended**: [jq](https://jqlang.github.io/jq/) (exact parsing of hook input; hooks fall back to `grep` without it)
 
-All hooks fail gracefully if optional tools are missing — nothing breaks, you just lose validation.
+The other hooks fail gracefully if an optional tool is missing: nothing breaks, you just lose some validation.
 
 ### Setup
 
@@ -261,9 +262,11 @@ CLAUDE.md                           # Master configuration
   settings.json                     # Hooks, permissions, safety rules
   agents/                           # 49 agent definitions (markdown + YAML frontmatter)
   skills/                           # 74 slash commands (subdirectory per skill)
-  hooks/                            # 14 scripts (bash) — 12 event hooks, yaml-helper.sh,
-                                    #   and one opt-in diagnostic you wire yourself
-  rules/                            # 13 path-scoped coding standards
+  hooks/                            # 22 scripts (bash and Python): 13 event hooks wired in
+                                    #   settings.json, shared helpers (yaml-helper.sh and
+                                    #   others), and one opt-in diagnostic you wire yourself
+  rules/                            # 14 rules: 13 path-scoped coding standards and the
+                                    #   always-loaded repository-content-safety.md
   statusline.sh                     # Status line script (context%, model, stage, epic breadcrumb)
   docs/
     workflow-catalog.yaml           # 7-phase pipeline definition (read by /help)

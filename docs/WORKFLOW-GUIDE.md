@@ -1246,7 +1246,7 @@ Tier 3 (Specialists):  gameplay-programmer, engine-programmer,
 
 ### Automated Hooks (Safety Net)
 
-The system has 12 hooks that run automatically:
+The system has 13 hooks that run automatically:
 
 | Hook | Trigger | What It Does |
 |------|---------|-------------|
@@ -1257,6 +1257,7 @@ The system has 12 hooks that run automatically:
 | `notify.sh` | Notification event | Shows Windows toast notification via PowerShell |
 | `validate-commit.sh` | Before commit | Checks for design doc references, valid JSON, no hardcoded values |
 | `validate-push.sh` | Before push | Warns on pushes to main/develop |
+| `validate-agent.sh` | Before an agent is spawned | Blocks agent types outside the reviewed framework roster |
 | `validate-assets.sh` | Before commit | Checks asset naming and size |
 | `validate-skill-change.sh` | Skill file written | Advises running `/skill-test` after `.claude/skills/` changes |
 | `log-agent.sh` | Agent start | Logs agent invocations for audit trail |
